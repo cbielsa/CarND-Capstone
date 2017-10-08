@@ -51,6 +51,11 @@ roslaunch launch/styx.launch
 ```
 4. Run the simulator
 
+To run the simulator in Windows and ROS in VMWare/Linux, do the following in Windows:
+
+Open command line in Admin mode (search for 'cmd' and press Ctrl+Shift+Enter)
+Execute "netsh interface portproxy add v4tov4 listenport=4567 listenaddress=127.0.0.1 connectport=4567 connectaddress=<vm_ip_address> protocol=tcp"
+
 ### Real world testing
 1. Download [training bag](https://drive.google.com/file/d/0B2_h37bMVw3iYkdJTlRSUlJIamM/view?usp=sharing) that was recorded on the Udacity self-driving car (a bag demonstraing the correct predictions in autonomous mode can be found [here](https://drive.google.com/open?id=0B2_h37bMVw3iT0ZEdlF4N01QbHc))
 2. Unzip the file
