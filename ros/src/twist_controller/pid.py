@@ -1,37 +1,41 @@
+#!/usr/bin/env python
 
 MIN_NUM = float('-inf')
 MAX_NUM = float('inf')
 
-
 class PID(object):
+
+    # Constructor
     def __init__(self, kp, ki, kd, mn=MIN_NUM, mx=MAX_NUM):
+
         self.kp = kp
         self.ki = ki
         self.kd = kd
         self.min = mn
         self.max = mx
+        self.int_val = self.last_error = 0.
 
-        self.int_val = self.last_int_val = self.last_error = 0.
 
+    # Reset integral value
     def reset(self):
-        self.int_val = 0.0
-        self.last_int_val = 0.0
+
+        self.int_val = self.last_error = 0.
+
 
     def step(self, error, sample_time):
-        self.last_int_val = self.int_val
 
-        integral = self.int_val + error * sample_time;
-        derivative = (error - self.last_error) / sample_time;
+        # calculate state integral and derivative terms
+        integral = self.int_val + error * sample_time
+        derivative = (error - self.last_error) / sample_time
 
-        y = self.kp * error + self.ki * self.int_val + self.kd * derivative;
-        val = max(self.min, min(y, self.max))
+        # calculate actuation with PID control
+        val = self.kp * error + self.ki * integral + self.kd * derivative
 
-        if val > self.max:
-            val = self.max
-        elif val < self.min:
-            val = self.min
-        else:
-            self.int_val = integral
+        # apply min and max allowed values
+        val = max(self.min, min(val, self.max))
+
+        # update controller state for next cycle
+        self.int_val = integral
         self.last_error = error
 
         return val

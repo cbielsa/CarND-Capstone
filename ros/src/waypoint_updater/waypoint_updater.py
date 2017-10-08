@@ -23,7 +23,7 @@ TODO (for Yousuf and Aaron): Stopline location for each traffic light.
 '''
 
 LOOKAHEAD_WPS = 200 # Number of waypoints we will publish. You can change this number
-
+MAX_SPEED = 5  # m/s
 
 class WaypointUpdater(object):
 
@@ -146,17 +146,14 @@ class WaypointUpdater(object):
                 # get base waypoint
                 wp = self.base_waypoints.waypoints[next_wp_index+i]
                 
-                # Set wp velocity to 5 m/s
-                wp.twist.twist.linear.x = 5.
+                # Set wp velocity to max allowed speed [m/s]
+                wp.twist.twist.linear.x = MAX_SPEED
 
                 # append modified waypoing to final waypoints
                 final_waypoints.waypoints.append(wp)
 
             # publish to topic final_waypoints
             self.final_waypoints_pub.publish(final_waypoints)
-
-        else:
-            pass
 
 
     def traffic_cb(self, msg):
