@@ -3,9 +3,10 @@
 import rospy
 from std_msgs.msg import Int32 
 from geometry_msgs.msg import PoseStamped
-from styx_msgs.msg import Lane, Waypoint
+from styx_msgs.msg import Lane, Waypoint, TrafficLightArray
 
 import math
+import tf
 
 '''
 This node will publish waypoints from the car's current position to some `x` distance ahead.
@@ -23,7 +24,7 @@ TODO (for Yousuf and Aaron): Stopline location for each traffic light.
 '''
 
 LOOKAHEAD_WPS = 200 # Number of waypoints we will publish. You can change this number
-MAX_SPEED = 5  # m/s
+MAX_SPEED = 10  # m/s
 
 class WaypointUpdater(object):
 
@@ -36,16 +37,24 @@ class WaypointUpdater(object):
         rospy.Subscriber('/current_pose', PoseStamped, self.pose_cb)
         rospy.Subscriber('/base_waypoints', Lane, self.waypoints_cb)
 
-        # TODO: Add a subscriber for /traffic_waypoint and /obstacle_waypoint below
+        # Add a subscriber for /traffic_waypoint and /obstacle_waypoint below
         rospy.Subscriber('/traffic_waypoint', Int32, self.traffic_cb)
         rospy.Subscriber('/obstacle_waypoint', Lane, self.obstacle_cb)
 
+
+        # For debugging purposes, subscribe to /vehicle/traffic_lights topic
+        #  It provides us with traffic lights ground truth.
+        # NOTE: Must be commented out while testing with traffic light detection code
+        rospy.Subscriber('vehicle/traffic_lights', TrafficLightArray, self.tl_ground_truth_cb)
+        
+        
         # Construct publisher
         self.final_waypoints_pub = rospy.Publisher('final_waypoints', Lane, queue_size=1)
 
         # TODO: Add other member variables you need below
         self.base_waypoints = None
 
+        self.tl_ground_truth = None
         rospy.spin()
 
 
@@ -56,7 +65,7 @@ class WaypointUpdater(object):
     def closest_waypoint(self, ego_x, ego_y):
 
         min_dist2 = 1e12
-        wp_index = 0  # index of closest waypoing
+        wp_index = 0  # index of closest waypoint
         index = 0
 
         for waypoint in self.base_waypoints.waypoints:
@@ -75,10 +84,39 @@ class WaypointUpdater(object):
         return wp_index
 
 
-    # Return index of next waypoing
-    # self.base_waypoints shall be defined 
-    def next_waypoing(self, ego_x, ego_y, ego_heading):
+    def get_euler_from_quaternion(self, quaternion):
+        # compute ego heading from quaternion
+        qx = quaternion.x
+        qy = quaternion.y
+        qz = quaternion.z
+        qw = quaternion.w
+        
+        #ego_heading = 2.*math.atan2(ego_qz, ego_qw)
+        euler = tf.transformations.euler_from_quaternion([qx,
+                                                          qy,
+                                                          qz,
+                                                          qw])
+        return euler
 
+
+    def is_behind_ego(self, ego_heading, other_heading):
+        # if closest waypoint is behind ego, take next wp
+        angle = abs(ego_heading - other_heading)
+        if angle > math.pi:
+            angle = abs(2.*math.pi - angle)
+
+        if angle > math.pi/2.:
+            return True
+        
+        return False
+    
+    # Return index of next waypoint
+    # self.base_waypoints shall be defined 
+    def next_waypoint(self, pose, ego_heading):
+
+        ego_x = pose.position.x
+        ego_y = pose.position.y
+        
         # find closest waypoint
         closest_wp_index = self.closest_waypoint(ego_x, ego_y)
         closest_wp = self.base_waypoints.waypoints[closest_wp_index]
@@ -88,23 +126,110 @@ class WaypointUpdater(object):
         closest_wp_y = closest_wp.pose.pose.position.y
         closest_wp_heading = math.atan2(closest_wp_y-ego_y, closest_wp_x-ego_x)
 
+        
         # if closest waypoint is behind ego, take next wp
-        angle = abs(ego_heading - closest_wp_heading)
-        if angle > math.pi:
-            angle = abs(2.*math.pi - angle)
-
-        if angle > math.pi/2.:
+        if (True == self.is_behind_ego(ego_heading, closest_wp_heading)):
             closest_wp_index += 1
-
+            
         return closest_wp_index
 
+    # Returns the next light in front of the ego_vehicle.
+    # If no light or the status unknown, returns false
+    def dbg_get_next_light(self, lights, ego_pose, ego_heading):
+
+        closest_light = None
+        found = False
+        closest_to_ego = 999
+        
+        for light in lights:
+            dist_from_ego = self.dist(ego_pose.position, light.pose.pose.position)
+            light_euler = self.get_euler_from_quaternion(light.pose.pose.orientation)
+            light_orientation = light_euler[2]
+
+            light_behind = self.is_behind_ego(ego_heading, light_orientation)
+
+            if(True == light_behind):
+                continue;
+
+            if(dist_from_ego < closest_to_ego):
+                dist_from_ego = closest_to_ego
+                closest_light = light
+                found = True
+
+        if ((closest_light != None) and (closest_light.state == closest_light.UNKNOWN)):
+            found = False
+        
+        return found, closest_light
+    
+    def print_msgHdr(self, header):
+        rospy.loginfo("      header:seq:%d time:%d.%d id:%s",
+                      header.seq,
+                      header.stamp.secs, header.stamp.nsecs,
+                      header.frame_id);
+        
+    def print_poseStamped(self, msg):
+
+        rospy.loginfo("  Pose msg:")
+        
+        self.print_msgHdr(msg.header)
+        
+        rospy.loginfo("      position: x:%f y:%f z:%f",
+                      msg.pose.position.x,
+                      msg.pose.position.y,
+                      msg.pose.position.z);
+        rospy.loginfo("      orientation: x:%f y:%f z:%f w:%f",
+                      msg.pose.orientation.x,
+                      msg.pose.orientation.y,
+                      msg.pose.orientation.z,
+                      msg.pose.orientation.w);
+
+    def print_twist(self, msg):
+
+        rospy.loginfo("  Twist msg:")
+        
+        self.print_msgHdr(msg.header)
+        
+        rospy.loginfo("      linear: x:%f y:%f z:%f",
+                      msg.twist.linear.x,
+                      msg.twist.linear.y,
+                      msg.twist.linear.z);
+        rospy.loginfo("      angular: x:%f y:%f z:%f",
+                      msg.twist.angular.x,
+                      msg.twist.angular.y,
+                      msg.twist.angular.z);
+        
+    def print_allWaypoints(self, waypoints):
+        
+        for ix, ww in enumerate(waypoints):
+            rospy.loginfo("Waypoint %d:", ix);
+            
+            self.print_poseStamped(ww.pose)
+            
+            self.print_twist(ww.twist)
+
+    def print_dbg_light(self, light):
+        rospy.loginfo("   Light state=%d", light.state)
+        rospy.loginfo("   (unknown=%d, green=%d, yellow=%d, red=%d)",
+                      light.UNKNOWN, light.GREEN, light.YELLOW, light.RED)
+        self.print_msgHdr(light.header)
+        self.print_poseStamped(light.pose)
+
+    def print_dbg_all_lights(self, lights):
+        i = 0
+        for light in lights:
+            rospy.loginfo(" Light:%d", i);
+            self.print_dbg_light(light)
+            i += 1
 
     # Subscriber callback functions ==================================
 
+    def tl_ground_truth_cb(self, traffic_light):
+        self.tl_ground_truth = traffic_light.lights
+        #self.print_dbg_all_lights(self.tl_ground_truth)
+
+        
     # Callback function for /base_waypoints
     def waypoints_cb(self, waypoints):
-        
-        # TODO: Implement
         if not self.base_waypoints:
             rospy.loginfo('Copying base_waypoints...')
             self.base_waypoints = waypoints
@@ -116,28 +241,29 @@ class WaypointUpdater(object):
         # if base waypoints are defined
         if self.base_waypoints:
 
-            ego_x = poseStamped.pose.position.x
-            ego_y = poseStamped.pose.position.y
-            #ego_z = poseStamped.pose.position.z
+            euler = self.get_euler_from_quaternion(poseStamped.pose.orientation)
 
-            # compute ego heading from quaternion
-            ego_qz = poseStamped.pose.orientation.z
-            ego_qw = poseStamped.pose.orientation.w
-            ego_heading = 2.*math.atan2(ego_qz, ego_qw)
-
-
+            ego_heading = euler[2]
             #rospy.loginfo("ego pose x: %f, y: %f, z: %f", ego_x, ego_y, ego_z)
             #rospy.loginfo(
             #    "ego pose qx: %f, qy: %f, qz: %f, qw: %f",
             #    ego_qx, ego_qy, ego_qz, ego_qw)
 
             #rospy.loginfo(
-            #    "ego heading: %f deg",
-            #    math.degrees(ego_heading) )
+            #    "ego heading: %f deg", math.degrees(ego_heading))
 
             # calculate index of waypoint in front of ego
-            next_wp_index = self.next_waypoing(ego_x, ego_y, ego_heading)
+            next_wp_index = self.next_waypoint(poseStamped.pose, ego_heading)
 
+            if (self.tl_ground_truth):
+                (light_ahead, light) = self.dbg_get_next_light(self.tl_ground_truth,
+                                                               poseStamped.pose,
+                                                               ego_heading)
+                
+                if(light_ahead == True):
+                    rospy.loginfo(" ** Light Ahead **")
+                    #self.print_dbg_light(light)
+                
             # fill final_waypoints with first LOOKAHEAD_WPS waypoints ahead of ego
             final_waypoints = Lane()
 
@@ -149,7 +275,7 @@ class WaypointUpdater(object):
                 # Set wp velocity to max allowed speed [m/s]
                 wp.twist.twist.linear.x = MAX_SPEED
 
-                # append modified waypoing to final waypoints
+                # append modified waypoint to final waypoints
                 final_waypoints.waypoints.append(wp)
 
             # publish to topic final_waypoints
@@ -186,6 +312,11 @@ class WaypointUpdater(object):
             dist += dl(waypoints[wp1].pose.pose.position, waypoints[i].pose.pose.position)
             wp1 = i
         return dist
+
+    #Note that this is different than above. wp1 and wp2 are waypoints not indices.
+    def dist(self, p1, p2):
+        x, y, z = p1.x - p2.x, p1.y - p2.y, p1.z - p2.z
+        return math.sqrt(x*x + y*y + z*z)
 
 
 if __name__ == '__main__':
