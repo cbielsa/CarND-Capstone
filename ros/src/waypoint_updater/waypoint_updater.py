@@ -260,8 +260,8 @@ class WaypointUpdater(object):
                                                                poseStamped.pose,
                                                                ego_heading)
                 
-                if(light_ahead == True):
-                    rospy.loginfo(" ** Light Ahead **")
+                #if(light_ahead == True):
+                    #rospy.loginfo(" ** Light Ahead **")
                     #self.print_dbg_light(light)
                 
             # fill final_waypoints with first LOOKAHEAD_WPS waypoints ahead of ego
