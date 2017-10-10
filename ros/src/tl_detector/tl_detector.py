@@ -10,8 +10,12 @@ from light_classification.tl_classifier import TLClassifier
 import tf
 import cv2
 import yaml
+import math
+
+import matplotlib.pyplot as plt
 
 STATE_COUNT_THRESHOLD = 3
+PROCESS_TL_GROUND_TRUTH = True
 
 class TLDetector(object):
     def __init__(self):
@@ -22,6 +26,10 @@ class TLDetector(object):
         self.camera_image = None
         self.lights = []
 
+        # Currently used to fake notification of traffic light state using ground truth
+        self.lights_ix = []
+        self.lights_indices = False
+        
         sub1 = rospy.Subscriber('/current_pose', PoseStamped, self.pose_cb)
         sub2 = rospy.Subscriber('/base_waypoints', Lane, self.waypoints_cb)
 
@@ -57,9 +65,7 @@ class TLDetector(object):
     def waypoints_cb(self, waypoints):
         self.waypoints = waypoints
 
-    def traffic_cb(self, msg):
-        self.lights = msg.lights
-
+                
     def image_cb(self, msg):
         """Identifies red lights in the incoming camera image and publishes the index
             of the waypoint closest to the red light's stop line to /traffic_waypoint
@@ -70,8 +76,14 @@ class TLDetector(object):
         """
         self.has_image = True
         self.camera_image = msg
-        light_wp, state = self.process_traffic_lights()
 
+        # NOTE: Used to lookup light state from ground truth. Must be updated to use
+        # process_traffic_lights function when ready
+        if(PROCESS_TL_GROUND_TRUTH):
+            light_wp, state = self.process_traffic_lights_ground_truth()
+        else:
+            light_wp, state = self.process_traffic_lights()
+            
         '''
         Publish upcoming red lights at camera frequency.
         Each predicted state has to occur `STATE_COUNT_THRESHOLD` number
@@ -146,6 +158,134 @@ class TLDetector(object):
         self.waypoints = None
         return -1, TrafficLight.UNKNOWN
 
+
+    # ==========================================================================
+    # Auxillary functions to implement process tl from ground_truth
+    #
+    def traffic_cb(self, msg):
+        self.lights = msg.lights
+
+        # NOTE: Here we try to find the indices of the traffic lights
+        #       and save them in lights_ix. Even though this is a function
+        #       used to fake trffic_waypoint notification in absence of real
+        #       tl_detection, making sure that we dont have to lookup the ix
+        #       in every iteration
+        #       Also note that self.lights can be used to verify training of
+        #       for tl_detection using images.
+        if(self.lights_indices == False):
+            for ix, light in enumerate(self.lights):
+
+                # Find and save index of every light
+                
+                #rospy.loginfo(" Light:%d", ix);
+                #rospy.loginfo("   Light state=%d", light.state)
+                #rospy.loginfo("   (unknown=%d, green=%d, yellow=%d, red=%d)",
+                #              light.UNKNOWN, light.GREEN, light.YELLOW, light.RED)
+                #rospy.loginfo("   Pose msg:")
+                #rospy.loginfo("      position: x:%f y:%f z:%f",
+                #              light.pose.pose.position.x,
+                #              light.pose.pose.position.y,
+                #              light.pose.pose.position.z);
+                #rospy.loginfo("      orientation: x:%f y:%f z:%f w:%f",
+                #              light.pose.pose.orientation.x,
+                #              light.pose.pose.orientation.y,
+                #              light.pose.pose.orientation.z,
+                #              light.pose.pose.orientation.w);
+
+                light_ix = []
+                light_ix.append(light)
+                light_wp = self.find_closest_waypoint_ix(light.pose, self.waypoints.waypoints)
+                light_ix.append(light_wp)
+
+                self.lights_ix.append(light_ix)
+                
+                rospy.loginfo("      Waypoint Index: %d", light_wp)
+
+            self.lights_indices = True
+        else:
+
+            # Update the state of the light
+            
+            for ix, light in enumerate(self.lights):
+                self.update_light_state(light, self.lights_ix)
+
+    
+    def dist(self, p1, p2):
+        x, y, z = p1.x - p2.x, p1.y - p2.y, p1.z - p2.z
+        return math.sqrt(x*x + y*y + z*z)
+
+    def find_closest_waypoint_ix(self, pose, waypoints):
+        closest_dist = 999
+        light_wp_index = 0
+        
+        for index, waypoint in enumerate(waypoints):
+            
+            distance = self.dist(waypoint.pose.pose.position,
+                                 pose.pose.position)
+            
+            if distance < closest_dist:
+                light_wp_index = index
+                closest_dist = distance
+
+        return light_wp_index
+
+    def update_light_state(self, new_light, lights_ix):
+        for light in lights_ix:
+            if((light[0].pose.pose.position.x == new_light.pose.pose.position.x)
+               and (light[0].pose.pose.position.y == new_light.pose.pose.position.y)):
+               light[0].state = new_light.state
+               break
+    
+    def process_traffic_lights_ground_truth(self):
+
+        #  1. get closest_waypoint_index to ego_vehicle
+        #  2. compare with closest waypoint_indeices of save light data
+        #     and return the closest
+
+        ego_waypoint_ix = self.find_closest_waypoint_ix(self.pose,
+                                                        self.waypoints.waypoints)
+
+        min_dist = 1e12
+        closest_light_ix = 0
+        closest_light_state = 0
+
+        return_light_ix = -1
+        return_light_state = TrafficLight.UNKNOWN
+        
+        # TODO: Fix wraparound
+        for light in self.lights_ix:
+            if(ego_waypoint_ix > light[1]):
+               continue;
+            dist_from_light = light[1] - ego_waypoint_ix
+            #rospy.loginfo("  ego_ix=%d, light_ix=%d", ego_waypoint_ix, light[1])
+            #rospy.loginfo("     min_dist=%d, dist_form_light=%d",
+            #              min_dist, dist_from_light)
+            if(min_dist > dist_from_light):
+               min_dist = dist_from_light
+               closest_light_ix = light[1]
+               closest_light_state = light[0].state
+
+
+        #rospy.loginfo(" Ego index: %d pos: x:%f, y:%f",
+        #              ego_waypoint_ix,
+        #              self.pose.pose.position.x,
+        #              self.pose.pose.position.y)
+
+        #rospy.loginfo(" Upcoming Light index: %d",
+        #              closest_light_ix)
+
+
+        # Since this is just faking the detection/state of the light based on ground_truth
+        # and the system keeps track of all lights on the track at any given time,
+        # notify only if the lights are within a visible range. approximating.
+
+        if ((closest_light_ix - ego_waypoint_ix) < 150):
+            return_light_ix = closest_light_ix
+            return_light_state = closest_light_state
+        
+        return return_light_ix, return_light_state
+    #===========================================================================
+    
 if __name__ == '__main__':
     try:
         TLDetector()

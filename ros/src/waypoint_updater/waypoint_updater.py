@@ -41,20 +41,13 @@ class WaypointUpdater(object):
         rospy.Subscriber('/traffic_waypoint', Int32, self.traffic_cb)
         rospy.Subscriber('/obstacle_waypoint', Lane, self.obstacle_cb)
 
-
-        # For debugging purposes, subscribe to /vehicle/traffic_lights topic
-        #  It provides us with traffic lights ground truth.
-        # NOTE: Must be commented out while testing with traffic light detection code
-        rospy.Subscriber('vehicle/traffic_lights', TrafficLightArray, self.tl_ground_truth_cb)
-        
-        
         # Construct publisher
-        self.final_waypoints_pub = rospy.Publisher('final_waypoints', Lane, queue_size=1)
+        self.final_waypoints_pub = rospy.Publisher('/final_waypoints', Lane, queue_size=1)
 
-        # TODO: Add other member variables you need below
+        # other member variables
         self.base_waypoints = None
+        self.base_waypoints_s = [] # base_waypoints segment numbers
 
-        self.tl_ground_truth = None
         rospy.spin()
 
 
@@ -62,7 +55,7 @@ class WaypointUpdater(object):
 
     # Return index of closest waypoint
     # self.base_waypoints shall be defined 
-    def closest_waypoint(self, ego_x, ego_y):
+    def closest_waypoint(self, ego_pose):
 
         min_dist2 = 1e12
         wp_index = 0  # index of closest waypoint
@@ -70,10 +63,8 @@ class WaypointUpdater(object):
 
         for waypoint in self.base_waypoints.waypoints:
 
-            wp_x = waypoint.pose.pose.position.x
-            wp_y = waypoint.pose.pose.position.y
-
-            dist2 = (ego_x-wp_x)**2 + (ego_y-wp_y)**2
+            dist2 = self.dist(waypoint.pose.pose.position,
+                              ego_pose.position)
 
             if dist2 < min_dist2:
                 wp_index = index
@@ -100,7 +91,6 @@ class WaypointUpdater(object):
 
 
     def is_behind_ego(self, ego_heading, other_heading):
-        # if closest waypoint is behind ego, take next wp
         angle = abs(ego_heading - other_heading)
         if angle > math.pi:
             angle = abs(2.*math.pi - angle)
@@ -118,7 +108,7 @@ class WaypointUpdater(object):
         ego_y = pose.position.y
         
         # find closest waypoint
-        closest_wp_index = self.closest_waypoint(ego_x, ego_y)
+        closest_wp_index = self.closest_waypoint(pose)
         closest_wp = self.base_waypoints.waypoints[closest_wp_index]
 
         # calculate the heading from ego to closest waypoint, in global frame [rad]
@@ -126,41 +116,12 @@ class WaypointUpdater(object):
         closest_wp_y = closest_wp.pose.pose.position.y
         closest_wp_heading = math.atan2(closest_wp_y-ego_y, closest_wp_x-ego_x)
 
-        
         # if closest waypoint is behind ego, take next wp
         if (True == self.is_behind_ego(ego_heading, closest_wp_heading)):
             closest_wp_index += 1
             
         return closest_wp_index
 
-    # Returns the next light in front of the ego_vehicle.
-    # If no light or the status unknown, returns false
-    def dbg_get_next_light(self, lights, ego_pose, ego_heading):
-
-        closest_light = None
-        found = False
-        closest_to_ego = 999
-        
-        for light in lights:
-            dist_from_ego = self.dist(ego_pose.position, light.pose.pose.position)
-            light_euler = self.get_euler_from_quaternion(light.pose.pose.orientation)
-            light_orientation = light_euler[2]
-
-            light_behind = self.is_behind_ego(ego_heading, light_orientation)
-
-            if(True == light_behind):
-                continue;
-
-            if(dist_from_ego < closest_to_ego):
-                dist_from_ego = closest_to_ego
-                closest_light = light
-                found = True
-
-        if ((closest_light != None) and (closest_light.state == closest_light.UNKNOWN)):
-            found = False
-        
-        return found, closest_light
-    
     def print_msgHdr(self, header):
         rospy.loginfo("      header:seq:%d time:%d.%d id:%s",
                       header.seq,
@@ -207,6 +168,15 @@ class WaypointUpdater(object):
             
             self.print_twist(ww.twist)
 
+    def print_allWaypoints_s(self, waypoints):
+            
+        for ix, ww in enumerate(waypoints):
+            rospy.loginfo("Waypoint %d: segment:%f", ix, self.base_waypoints_s[ix]);
+            
+            self.print_poseStamped(ww.pose)
+            
+            self.print_twist(ww.twist)
+
     def print_dbg_light(self, light):
         rospy.loginfo("   Light state=%d", light.state)
         rospy.loginfo("   (unknown=%d, green=%d, yellow=%d, red=%d)",
@@ -223,21 +193,30 @@ class WaypointUpdater(object):
 
     # Subscriber callback functions ==================================
 
-    def tl_ground_truth_cb(self, traffic_light):
-        self.tl_ground_truth = traffic_light.lights
-        #self.print_dbg_all_lights(self.tl_ground_truth)
-
-        
     # Callback function for /base_waypoints
     def waypoints_cb(self, waypoints):
         if not self.base_waypoints:
             rospy.loginfo('Copying base_waypoints...')
             self.base_waypoints = waypoints
 
+            self.base_waypoints_s.append(0)
+
+            rospy.loginfo('Computing base_waypoint segments...')
+            for ix in range(len(waypoints.waypoints)-1):
+                self.base_waypoints_s.append(self.distance(waypoints.waypoints,
+                                                           ix, ix+1))
+        
+            for ix in range(len(self.base_waypoints_s)-1):
+                self.base_waypoints_s[ix+1] += self.base_waypoints_s[ix]
+            
+            #self.print_allWaypoints_s(waypoints.waypoints)
+                        
 
     # Callback function for /current_pose
     def pose_cb(self, poseStamped):
 
+        #rospy.loginfo('pose_cb...')
+            
         # if base waypoints are defined
         if self.base_waypoints:
 
@@ -255,14 +234,6 @@ class WaypointUpdater(object):
             # calculate index of waypoint in front of ego
             next_wp_index = self.next_waypoint(poseStamped.pose, ego_heading)
 
-            if (self.tl_ground_truth):
-                (light_ahead, light) = self.dbg_get_next_light(self.tl_ground_truth,
-                                                               poseStamped.pose,
-                                                               ego_heading)
-                
-                #if(light_ahead == True):
-                    #rospy.loginfo(" ** Light Ahead **")
-                    #self.print_dbg_light(light)
                 
             # fill final_waypoints with first LOOKAHEAD_WPS waypoints ahead of ego
             final_waypoints = Lane()
@@ -284,12 +255,13 @@ class WaypointUpdater(object):
 
     def traffic_cb(self, msg):
         # TODO: Callback for /traffic_waypoint message. Implement
+        rospy.loginfo("traffic_cb: Traffic light RED. waypoint index %d", msg.data)
+        
         pass
 
     def obstacle_cb(self, msg):
         # TODO: Callback for /obstacle_waypoint message. We will implement it later
         pass
-
 
     # Get waypoint velocity from message
     # (a scalar, along X in vehcile frame)
