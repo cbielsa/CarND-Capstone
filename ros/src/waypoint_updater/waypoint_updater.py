@@ -2,7 +2,7 @@
 
 import rospy
 from std_msgs.msg import Int32 
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, TwistStamped
 from styx_msgs.msg import Lane, Waypoint, TrafficLightArray
 
 import math
@@ -24,7 +24,8 @@ TODO (for Yousuf and Aaron): Stopline location for each traffic light.
 '''
 
 LOOKAHEAD_WPS = 200 # Number of waypoints we will publish. You can change this number
-MAX_SPEED = 10  # m/s
+MAX_SPEED = 10.  # m/s
+MAX_ACCL = 0.446 #m/s^2
 
 class WaypointUpdater(object):
 
@@ -46,8 +47,17 @@ class WaypointUpdater(object):
 
         # other member variables
         self.base_waypoints = None
+
         self.base_waypoints_s = [] # base_waypoints segment numbers
 
+        self.next_red_tl_waypoint_ix = 0
+        
+        self.v_target = MAX_SPEED #Unused...
+
+        # Subscriber for current velocity
+        rospy.Subscriber('/current_velocity', TwistStamped, self.current_velocity_cb)
+        self.v_current = 0
+        
         rospy.spin()
 
 
@@ -193,6 +203,22 @@ class WaypointUpdater(object):
 
     # Subscriber callback functions ==================================
 
+    # Callback function for /current_velocity
+    def current_velocity_cb(self, twistStamped):
+        
+        # update current (measured) state
+        self.v_current = twistStamped.twist.linear.x
+        #self.w_current = twistStamped.twist.angular.z
+
+        #rospy.loginfo('Measured v: %f, %f, %f, measured w: %f, %f, %f',
+        #    self.v_current,
+        #    twistStamped.twist.linear.y,
+        #    twistStamped.twist.linear.z,
+        #    twistStamped.twist.angular.x,
+        #    twistStamped.twist.angular.y,
+        #    self.w_current
+        #    )
+
     # Callback function for /base_waypoints
     def waypoints_cb(self, waypoints):
         if not self.base_waypoints:
@@ -210,8 +236,30 @@ class WaypointUpdater(object):
                 self.base_waypoints_s[ix+1] += self.base_waypoints_s[ix]
             
             #self.print_allWaypoints_s(waypoints.waypoints)
-                        
 
+    # Unused...
+    def get_max_accel(self, distance_to_redlight):
+        delta_v_til_target = MAX_SPEED - self.v_target
+        max_accl = min(MAX_ACCL, delta_v_til_target)
+
+        # based on current target velocity, determine the stopping distance.
+        # TBD: Simplistic. At this point no breakind_distance + no use of brake_deadband. 
+        
+        mu = 1.
+        g = 9.8
+        
+        breaking_distance = (self.v_target * self.v_target)/(2*mu*g) 
+        
+        if(distance_to_redlight != 0):
+            available_dist = distance_to_redlight - breaking_distance
+
+            if(available_dist < 0):
+                max_accl = -MAX_ACCL
+            else:
+                max_accl = min(max_accl, available_dist)
+
+        return max_accl
+            
     # Callback function for /current_pose
     def pose_cb(self, poseStamped):
 
@@ -233,32 +281,89 @@ class WaypointUpdater(object):
 
             # calculate index of waypoint in front of ego
             next_wp_index = self.next_waypoint(poseStamped.pose, ego_heading)
-
-                
-            # fill final_waypoints with first LOOKAHEAD_WPS waypoints ahead of ego
+            
+            # create final_waypoints to fill waypoints ahead
+            num_waypoints = LOOKAHEAD_WPS
             final_waypoints = Lane()
 
-            for i in range(LOOKAHEAD_WPS):
+            distance_to_redlight = 0
+            
+            if(self.next_red_tl_waypoint_ix):
 
-                # get base waypoint
-                wp = self.base_waypoints.waypoints[next_wp_index+i]
+                # The light ahead is red
+                light_wp_s = self.base_waypoints_s[self.next_red_tl_waypoint_ix]
+                ego_wp_s = self.base_waypoints_s[next_wp_index]
                 
-                # Set wp velocity to max allowed speed [m/s]
-                wp.twist.twist.linear.x = MAX_SPEED
+                # TODO: We are currently ignoring the dist between ego and the next_wp
+                distance_to_redlight = light_wp_s - ego_wp_s
+                
+                mu = 1. # Assumption 
+                g = 9.8
+                
 
-                # append modified waypoint to final waypoints
-                final_waypoints.waypoints.append(wp)
+                num_waypoints = self.next_red_tl_waypoint_ix - next_wp_index
+                
+                # Modify the number of waypoints to send based on different factors
+                # TODO: Some improvement needed - system delays etc.
+                
 
-            # publish to topic final_waypoints
-            self.final_waypoints_pub.publish(final_waypoints)
+                # so as not to get into the intersection. roughly corresponds to meters
+                # TODO: Is there a way to intellegently find this out?
+                num_waypoints -= 30
+
+                
+                # Compute breaking distance based on v_current 
+                breaking_distance = (self.v_current * self.v_current)/(2*mu*g) 
+
+                num_waypoints -= int(round(breaking_distance))
+                
+                if(num_waypoints < 0):
+                    num_waypoints = 0
+                        
+                rospy.loginfo("   Red light ahead: num_waypoints %d", num_waypoints)
+                rospy.loginfo("    Breakind distance %f", breaking_distance)
+                
+                for i in range(num_waypoints):
+                    # get base waypoint
+                    wp = self.base_waypoints.waypoints[next_wp_index+i]
+                    
+                    # Set wp velocity to target_velocity
+                    wp.twist.twist.linear.x = MAX_SPEED*(num_waypoints - i - 1)/num_waypoints
+                    
+                    # append modified waypoint to final waypoints
+                    final_waypoints.waypoints.append(wp)
+                    
+                    
+            else:
+                rospy.loginfo("   NO Red light ahead: num_waypoints %d", num_waypoints)
+                for i in range(num_waypoints):
+                    
+                    # get base waypoint
+                    wp = self.base_waypoints.waypoints[next_wp_index+i]
+                    
+                    # Set wp velocity to target_velocity
+                    wp.twist.twist.linear.x = MAX_SPEED
+                    
+                    # append modified waypoint to final waypoints
+                    final_waypoints.waypoints.append(wp)
+
+
+            if (num_waypoints > 0):
+                # publish to topic final_waypoints
+                self.final_waypoints_pub.publish(final_waypoints)
 
 
     def traffic_cb(self, msg):
         # TODO: Callback for /traffic_waypoint message. Implement
-        rospy.loginfo("traffic_cb: Traffic light RED. waypoint index %d", msg.data)
-        
-        pass
+        if(msg.data ==  -1):
+            self.next_red_tl_waypoint_ix = 0
+            return
 
+        rospy.loginfo("traffic_cb: Traffic light RED. waypoint index %d", msg.data)
+
+        self.next_red_tl_waypoint_ix = msg.data
+        
+        
     def obstacle_cb(self, msg):
         # TODO: Callback for /obstacle_waypoint message. We will implement it later
         pass
