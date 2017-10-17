@@ -11,6 +11,7 @@ import tf
 import cv2
 import yaml
 import math
+import random
 
 import matplotlib.pyplot as plt
 
@@ -47,6 +48,8 @@ class TLDetector(object):
 
         config_string = rospy.get_param("/traffic_light_config")
         self.config = yaml.load(config_string)
+        self.tl_nearest_wps = [] # list of index of nearest waypoint to traffic lights
+        self.wp_to_nearest_stopline_wp = {} # map from waypoint index to nearest tl stopline waypoint index
 
         self.upcoming_red_light_pub = rospy.Publisher('/traffic_waypoint', Int32, queue_size=1)
 
@@ -77,6 +80,45 @@ class TLDetector(object):
     def waypoints_cb(self, waypoints):
         self.waypoints = waypoints
 
+        # Processing stop line positions
+        # Since this function is called only once, doing this
+        # calculation here should be fine
+        stop_line_positions = self.config['stop_line_positions']
+        rospy.loginfo("stop positions %s %d", stop_line_positions, len(stop_line_positions))
+        dl = lambda a, b: math.sqrt((a.x - b[0])**2 + (a.y - b[1])**2) 
+        for p in stop_line_positions:
+            nearest_wp_idx = 0
+            min_dist = 1e12
+            for i in range(len(waypoints.waypoints)):
+                d = dl(waypoints.waypoints[i].pose.pose.position, p) 
+                if d < min_dist:
+                    min_dist = d
+                    nearest_wp_idx = i
+            self.tl_nearest_wps.append(nearest_wp_idx)
+
+        # sort the list in case stop lines were not in order
+        self.tl_nearest_wps.sort()
+
+        rospy.loginfo("tl_nearest_wps %s", self.tl_nearest_wps)
+        # for p in self.tl_nearest_wps:
+        #     rospy.loginfo("tl waypoint %s", waypoints.waypoints[p].pose.pose.position)
+
+        # populate map from waypoint index to nearest stopline waypoint index
+        wp_idx = 0
+        for stop_wp_idx in self.tl_nearest_wps:
+            while wp_idx <= stop_wp_idx:
+                self.wp_to_nearest_stopline_wp[wp_idx] = stop_wp_idx
+                wp_idx += 1
+
+        while wp_idx < len(waypoints.waypoints):
+            self.wp_to_nearest_stopline_wp[wp_idx] = 0 # loop around the track
+            wp_idx += 1
+
+        # # Randomly test few waypoints
+        # for i in random.sample(range(len(waypoints.waypoints)), 10):
+        #     rospy.loginfo("idx:%d stop_idx:%d", i, self.wp_to_nearest_stopline_wp[i])
+        # i = self.tl_nearest_wps[0]
+        # rospy.loginfo("idx:%d stop_idx:%d", i, self.wp_to_nearest_stopline_wp[i])
     
     def image_cb(self, msg):
         """Identifies red lights in the incoming camera image and publishes the index
