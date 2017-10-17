@@ -22,12 +22,22 @@ class Controller(object):
     	self.decel_limit = decel_limit
         self.vehicle_mass = vehicle_mass
         self.wheel_radius = wheel_radius
+        #self.fuel_capacity = fuel_capacity
+
+        # time of last cycle
+        self.last_time = None
+
+        self.brake_factor = abs(self.decel_limit)*self.wheel_radius*(
+        	self.vehicle_mass )
+        	#self.vehicle_mass + self.fuel_capacity*GAS_DENSITY )
 
         # construct PID speed controller
-        kp = 0.2
-        ki = 0.
-        kd = 0.
-        self.sample_time = sample_time  # time between controller cycles [s]
+        kp = 0.5
+        ki = 0.0003
+        kd = 0.04
+
+        # time between controller cycles if no latency [s]
+        self.sample_time = sample_time
         self.speed_controller = PID(kp, ki, kd, -1., 1.)
 
         # construct yaw controller
@@ -36,25 +46,34 @@ class Controller(object):
 
         # construct low pass filter for steering control
         #ts  = 1.
-        #tau = 3.  # the larger tau, the more filtering (slower response to changes)
+        #tau = 5.  # the larger tau, the more filtering (slower response to changes)
         #self.steer_filter = LowPassFilter(tau, ts)
-        #self.w_target_filter = LowPassFilter(tau, ts)
 
 
     # Reset controller
     def reset(self):
 
     	# reset integral value of PID controller
-    	self.speed_controller.reset() 
+    	self.speed_controller.reset()
+
+    	# reset last time
+    	self.last_time = None
 
 
     # Calculate actuations
+    # inputs are expected to have been filtered by caller (if required)
     def control(self, v_target, w_target, v_current, w_current):
 
-    	rospy.loginfo('v_target: %f, v_current: %f', v_target, v_current)
-        
+    	# calculate time elapsed since last cycle
+    	time = rospy.get_time()
+    	if self.last_time:
+    		time_step = time - self.last_time
+    	else:
+    		time_step = self.sample_time
+    	self.last_time = time
+
     	# calculate throttle/brake with PID controller (in range [-1, 1])
-    	throttle = self.speed_controller.step(v_target - v_current, self.sample_time)
+    	throttle = self.speed_controller.step(v_target - v_current, time_step)
 
     	# case brake
     	if throttle < 0:
@@ -67,17 +86,15 @@ class Controller(object):
     	# torque = acc*wheel_radius*vehicle_mass
     	# TBC that what is commanded is total torque and not torque per wheel
     	if brake != 0.:
-    		brake = brake*abs(self.decel_limit)*self.wheel_radius*self.vehicle_mass
+    		brake = brake*self.brake_factor
 
     	# calculate steering actuation with yaw controller [rad]
 
     	#w_target = self.w_target_filter.filt(w_target)
     	steer = self.yaw_controller.get_steering(v_target, w_target, v_current)
 
-    	# filter steering actuation
-    	#steer = self.steer_filter.filt(steer)
-
-    	rospy.loginfo('w_target: %f, v_target: %f, v_current: %f, steer: %f deg',
-    		w_target, v_target, v_current, math.degrees(steer))
+    	#rospy.loginfo(
+    	#	'w_target: %f, w_current: %f, v_target: %f, v_current: %f, steer: %f deg',
+    	#	w_target, w_current, v_target, v_current, math.degrees(steer))
 
         return throttle, brake, steer

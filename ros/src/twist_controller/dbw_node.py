@@ -7,6 +7,7 @@ from geometry_msgs.msg import TwistStamped
 import math
 
 from twist_controller import Controller
+from lowpass import LowPassFilter
 
 '''
 You can build this node only after you have built (or partially built) the `waypoint_updater` node.
@@ -47,16 +48,24 @@ class DBWNode(object):
         steer_ratio = rospy.get_param('~steer_ratio', 14.8)
         max_lat_accel = rospy.get_param('~max_lat_accel', 3.)
         max_steer_angle = rospy.get_param('~max_steer_angle', 8.)
-        min_speed = 0.1
+        min_speed = 0.5
 
         # Node state attributes
         self.v_target = 0.        # target linear velocity [m/s]
         self.w_target = 0.        # target angular velocity [rad/s]
         self.v_current = 0.       # current (measured) linear velocity [m/s]
-        self.w_current = 0.       # current (measured) angular velocity [rad/s]
+        #self.w_current = 0.       # current (measured) angular velocity [rad/s]
         self.dbw_enabled = False  # is DBW enabled
-
         self.controller_freq = 10  # controller frequency [Hz] 
+
+        # construct low pass filter for angular rate measurements
+        ts  = 1.
+        tau = 8.  # the larger tau, the more filtering (slower response to changes)
+        self.w_current_filter = LowPassFilter(tau, ts)
+
+        ts  = 1.
+        tau = 0.  # the larger tau, the more filtering (slower response to changes)
+        self.w_target_filter = LowPassFilter(tau, ts)        
 
         # Construct publishers
         self.steer_pub = rospy.Publisher(
@@ -77,7 +86,6 @@ class DBWNode(object):
         rospy.Subscriber('/current_velocity', TwistStamped, self.current_velocity_cb)
         rospy.Subscriber('/vehicle/dbw_enabled', Bool, self.dbw_enabled_cb)
 
-
         # Start control loop
         self.loop()
 
@@ -88,6 +96,8 @@ class DBWNode(object):
         # update target state
         self.v_target = twistStamped.twist.linear.x
         self.w_target = twistStamped.twist.angular.z
+
+        self.w_target_filter.filt(self.w_target)
         
         #rospy.loginfo('Commanded v: %f, commanded w: %f', self.v_target, self.w_target)
 
@@ -95,9 +105,12 @@ class DBWNode(object):
     # Callback function for /current_velocity
     def current_velocity_cb(self, twistStamped):
         
-        # update current (measured) state
+        # update estimated speed (set to current measured value)
         self.v_current = twistStamped.twist.linear.x
-        self.w_current = twistStamped.twist.angular.z
+        
+        # update estimated (filtered) angular rate
+        #self.w_current = twistStamped.twist.angular.z
+        self.w_current_filter.filt( twistStamped.twist.angular.z )
 
         #rospy.loginfo('Measured v: %f, %f, %f, measured w: %f, %f, %f',
         #    self.v_current,
@@ -130,30 +143,18 @@ class DBWNode(object):
     
     def loop(self):
 
-        # [cbielsa]: reduced rate due to limitations in my system
-        rate = rospy.Rate(10) # 50Hz
+        rate = rospy.Rate(self.controller_freq)
 
         while not rospy.is_shutdown():
 
-            # TODO: Get predicted throttle, brake, and steering using `twist_controller`
-            # You should only publish the control commands if dbw is enabled
-            # throttle, brake, steering = self.controller.control(<proposed linear velocity>,
-            #                                                     <proposed angular velocity>,
-            #                                                     <current linear velocity>,
-            #                                                     <dbw status>,
-            #                                                     <any other argument you need>)
-            
-
             if self.dbw_enabled:
-
-                #rospy.loginfo('dbw enabled')
 
                 # call controller and publish actuations
                 throttle, brake, steer = self.controller.control(
-                    self.v_target, self.w_target, self.v_current, self.w_current)
+                    self.v_target, self.w_target_filter.get(), self.v_current,
+                    self.w_current_filter.get() )
 
                 self.publish(throttle, brake, steer)
-
 
             # sleep until next control cycle
             rate.sleep()
