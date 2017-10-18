@@ -24,10 +24,14 @@ TODO (for Yousuf and Aaron): Stopline location for each traffic light.
 '''
 
 LOOKAHEAD_WPS = 200 # Number of waypoints we will publish. You can change this number
-MAX_SPEED = 7.  # m/s
-MAX_ACC   = 9.  # m/s^2
+MAX_SPEED  = 7.  # m/s
+MAX_ACC    = 9.  # m/s^2
+BRAKE_DECC = 3.  # decceleration used to stop car whenever possible [m/s^2]
 
-MARGIN_WP_TO_TL = 35  # number of wp ahead of red light ego stops at
+# Braking distance when ego is at maximum speed and brakes at max accel.
+MAX_BRAKE_DIST = MAX_SPEED*MAX_SPEED/(2.*BRAKE_DECC)
+
+MARGIN_TO_TL = 25.  # distance ahead of red light ego stops at [m]
 
 class WaypointUpdater(object):
 
@@ -194,24 +198,16 @@ class WaypointUpdater(object):
 
 
     # Callback function for /base_waypoints
+    #
+    # For info: in SIM, there are 10902 wps at an average distance of 0.64 m,
+    # but distance between consecutive wps are actually quite variable
+    # Hence waypoint index cannot be used as a reliable proxy of distance
     def waypoints_cb(self, waypoints):
 
         if not self.base_waypoints:
 
             #rospy.loginfo('Copying base_waypoints...')
             self.base_waypoints = waypoints
-
-            #self.base_waypoints_s.append(0)
-
-            #rospy.loginfo('Computing base_waypoint segments...')
-            #for ix in range(len(waypoints.waypoints)-1):
-            #    self.base_waypoints_s.append(self.distance(waypoints.waypoints,
-            #                                               ix, ix+1))
-        
-            #for ix in range(len(self.base_waypoints_s)-1):
-            #    self.base_waypoints_s[ix+1] += self.base_waypoints_s[ix]
-            
-            #self.print_allWaypoints_s(waypoints.waypoints)
 
 
     # Callback function for /traffic_waypoint message 
@@ -320,10 +316,23 @@ class WaypointUpdater(object):
             self.final_waypoints.waypoints.append(wp)
 
 
+    # calculate index of wp in front of the wp with index target_wp_ix
+    # and at a distance >= d
+    def find_wp_at_distance_in_front(self, target_wp_ix, d):
+
+        ix = target_wp_ix-1
+        while self.dist_ix(ix, target_wp_ix) < d:
+            ix -= 1
+
+        return ix
+
+
     # Calculate and publish final waypoints
     def loop(self):
 
         rate = rospy.Rate(self.freq)
+
+        rospy.loginfo("braking distance: %f", MAX_BRAKE_DIST)
 
         while not rospy.is_shutdown():
 
@@ -339,24 +348,33 @@ class WaypointUpdater(object):
                 ego_position, ego_heading = self.get_pose(t)
 
                 # set init waypoint index to waypoint in front of ego
-                next_wp_ix = self.next_waypoint(
+                ego_next_wp_ix = self.next_waypoint(
                     ego_position, ego_heading)
 
                 # set init wp to wp ahead and init velocity
                 # to last measured ego velocity
-                init_wp_ix = next_wp_ix
+                init_wp_ix = ego_next_wp_ix
                 init_velocity = self.current_velocity
 
-                # if red light ahead
+                # if red light in planning horizon
                 if( self.next_red_tl_wp_ix
-                    and 0 < self.next_red_tl_wp_ix-MARGIN_WP_TO_TL-next_wp_ix < LOOKAHEAD_WPS ):
+                    and 0 < self.next_red_tl_wp_ix-ego_next_wp_ix < LOOKAHEAD_WPS ):
 
-                    # if red light is far away, approach red light at max speed
-                    if self.next_red_tl_wp_ix-MARGIN_WP_TO_TL-next_wp_ix > 100:
+                    # set target stop point to MARGIN_TO_TL meters before traffic light
+                    stop_wp_ix = self.find_wp_at_distance_in_front(
+                        self.next_red_tl_wp_ix, MARGIN_TO_TL)
+
+                    # identify wp at which ego shall start braking
+                    start_brake_wp_ix = self.find_wp_at_distance_in_front(
+                        stop_wp_ix, MAX_BRAKE_DIST)
+
+                    # if there is some distance up to the point where braking shall start,
+                    # advance car up to that point targeting max speed
+                    if start_brake_wp_ix > ego_next_wp_ix:
 
                         # set target velocity to max velocity
-                        # and target waypoint to 50 wps ahead of ego
-                        target_wp_ix = self.next_red_tl_wp_ix-MARGIN_WP_TO_TL-next_wp_ix-100
+                        # and target waypoint to position at which ego shall start to brake
+                        target_wp_ix = start_brake_wp_ix
                         target_velocity = MAX_SPEED
 
                         # calculate and append waypoints from init to target state
@@ -370,39 +388,43 @@ class WaypointUpdater(object):
 
                         rospy.loginfo(
                             "Red light far ahead, guiding to %f m/s, then to a stop in %d wps",
-                            target_velocity, self.next_red_tl_wp_ix-MARGIN_WP_TO_TL-next_wp_ix)
+                            target_velocity, stop_wp_ix-ego_next_wp_ix)
 
 
-                    # stop in front of the red light -----
+                    # stop in front of the red light
                     
                     # set target velocity to zero
-                    # and target waypoint to 35 wps before traffic light
-                    target_wp_ix = self.next_red_tl_wp_ix-MARGIN_WP_TO_TL
+                    # and target waypoint to stop point ahead of traffic light
+                    target_wp_ix = stop_wp_ix
                     target_velocity = 0.
 
-                    # calculate and append waypoints from init to target state
-                    self.append_final_waypoints(
-                        init_wp_ix, init_velocity,
-                        target_wp_ix, target_velocity,
-                        False)  # stop exactly at target_wp_ix, not before
+                    if target_wp_ix > init_wp_ix:
 
-                    # update init state
-                    #init_wp_ix = target_wp_ix
-                    #init_velocity = target_velocity
+                        # calculate and append waypoints from init to target state
+                        self.append_final_waypoints(
+                            init_wp_ix, init_velocity,
+                            target_wp_ix, target_velocity,
+                            False)  # stop exactly at target_wp_ix, not before
 
-                    if self.next_red_tl_wp_ix-MARGIN_WP_TO_TL-next_wp_ix <= 100:
+                        if start_brake_wp_ix <= ego_next_wp_ix:
+                            rospy.loginfo(
+                                "Red light close ahead, guiding to a stop in %d wps",
+                                stop_wp_ix-ego_next_wp_ix)
+
+                    else:
                         rospy.loginfo(
-                            "Red light close ahead, guiding to a stop in %d wps",
-                            self.next_red_tl_wp_ix-MARGIN_WP_TO_TL-next_wp_ix)
+                            "Red light close ahead at %d wps, stop point overshot, just stay there :S",
+                            self.next_red_tl_wp_ix-ego_next_wp_ix)
 
 
-                # if no red light ahead
-                # (or stop point overshot)
+
+                # if no red light ahead or stop point was overshot:
+                # progress targetting maximum speed
                 else:
 
                     # set target velocity to max velocity
                     # and target waypoint LOOKAHEAD_WPS waypoints ahead of ego
-                    target_wp_ix = next_wp_ix + LOOKAHEAD_WPS
+                    target_wp_ix = ego_next_wp_ix + LOOKAHEAD_WPS
                     target_velocity = MAX_SPEED
 
                     # calculate and append waypoints from init to target state
@@ -410,7 +432,8 @@ class WaypointUpdater(object):
                         init_wp_ix, init_velocity,
                         target_wp_ix, target_velocity)
 
-                    rospy.loginfo("No red light ahead, guiding to %f m/s", target_velocity)
+                    rospy.loginfo(
+                        "No red light ahead, guiding to %f m/s", target_velocity)
 
 
                 # publish to topic final_waypoints
@@ -422,7 +445,6 @@ class WaypointUpdater(object):
             rate.sleep()
 
 
-        
         
 #    def obstacle_cb(self, msg):
         # TODO: Callback for /obstacle_waypoint message. We will implement it later
@@ -460,29 +482,8 @@ class WaypointUpdater(object):
         return math.sqrt(x*x + y*y + z*z)
 
 
-    # Unused...
-    #def get_max_accel(self, distance_to_redlight):
-    #    delta_v_til_target = MAX_SPEED - self.v_target
-    #    MAX_ACC = min(MAX_ACC, delta_v_til_target)
 
-        # based on current target velocity, determine the stopping distance.
-        # TBD: Simplistic. At this point no breakind_distance + no use of brake_deadband. 
-        
-    #    mu = 1.
-    #    g = 9.8
-        
-    #    breaking_distance = (self.v_target * self.v_target)/(2*mu*g) 
-        
-    #    if(distance_to_redlight != 0):
-    #        available_dist = distance_to_redlight - breaking_distance
-
-    #        if(available_dist < 0):
-    #            MAX_ACC = -MAX_ACC
-    #        else:
-    #            MAX_ACC = min(MAX_ACC, available_dist)
-
-    #    return MAX_ACC
-
+    # Print auxiliary functions
 
     def print_msgHdr(self, header):
         rospy.loginfo("      header:seq:%d time:%d.%d id:%s",
