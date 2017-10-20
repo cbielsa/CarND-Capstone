@@ -19,7 +19,9 @@ STATE_COUNT_THRESHOLD = 3
 PROCESS_TL_GROUND_TRUTH = False
 
 class TLDetector(object):
+
     def __init__(self):
+
         rospy.init_node('tl_detector')
 
         self.pose = None
@@ -62,8 +64,18 @@ class TLDetector(object):
 
         rospy.spin()
 
+
+    def initialized(self):
+
+        if self.waypoints:
+            return True
+        else:
+            return False
+
+
     def pose_cb(self, msg):
         self.pose = msg
+
 
     def waypoints_cb(self, waypoints):
         self.waypoints = waypoints
@@ -107,7 +119,7 @@ class TLDetector(object):
         #     rospy.loginfo("idx:%d stop_idx:%d", i, self.wp_to_nearest_stopline_wp[i])
         # i = self.tl_nearest_wps[0]
         # rospy.loginfo("idx:%d stop_idx:%d", i, self.wp_to_nearest_stopline_wp[i])
-
+    
     def image_cb(self, msg):
         """Identifies red lights in the incoming camera image and publishes the index
             of the waypoint closest to the red light's stop line to /traffic_waypoint
@@ -116,6 +128,10 @@ class TLDetector(object):
             msg (Image): image from car-mounted camera
 
         """
+        
+        if not self.initialized():
+            return
+
         self.has_image = True
         self.camera_image = msg
 
@@ -143,6 +159,7 @@ class TLDetector(object):
         else:
             self.upcoming_red_light_pub.publish(Int32(self.last_wp))
         self.state_count += 1
+
 
     def get_closest_waypoint(self, pose):
         """Identifies the closest path waypoint to the given position
@@ -175,6 +192,7 @@ class TLDetector(object):
 
         #Get classification
         return self.light_classifier.get_classification(cv_image)
+
 
     def process_traffic_lights(self):
         """Finds closest visible traffic light, if one exists, and determines its
@@ -235,6 +253,10 @@ class TLDetector(object):
     # Auxillary functions to implement process tl from ground_truth
     #
     def traffic_cb(self, msg):
+
+        if not self.initialized():
+            return
+
         self.lights = msg.lights
 
         # NOTE: Here we try to find the indices of the traffic lights
@@ -245,6 +267,7 @@ class TLDetector(object):
         #       Also note that self.lights can be used to verify training of
         #       for tl_detection using images.
         if(self.lights_indices == False):
+
             for ix, light in enumerate(self.lights):
 
                 # Find and save index of every light
@@ -274,10 +297,10 @@ class TLDetector(object):
                 rospy.loginfo("      Waypoint Index: %d", light_wp)
 
             self.lights_indices = True
+        
         else:
 
             # Update the state of the light
-            
             for ix, light in enumerate(self.lights):
                 self.update_light_state(light, self.lights_ix)
 
@@ -285,6 +308,7 @@ class TLDetector(object):
     def dist(self, p1, p2):
         x, y, z = p1.x - p2.x, p1.y - p2.y, p1.z - p2.z
         return math.sqrt(x*x + y*y + z*z)
+
 
     def find_closest_waypoint_ix(self, pose, waypoints):
         closest_dist = 999
@@ -301,6 +325,7 @@ class TLDetector(object):
 
         return light_wp_index
 
+
     def update_light_state(self, new_light, lights_ix):
         for light in lights_ix:
             if((light[0].pose.pose.position.x == new_light.pose.pose.position.x)
@@ -308,6 +333,7 @@ class TLDetector(object):
                light[0].state = new_light.state
                break
     
+
     def process_traffic_lights_ground_truth(self):
 
         #  1. get closest_waypoint_index to ego_vehicle
