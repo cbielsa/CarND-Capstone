@@ -16,7 +16,7 @@ import random
 import matplotlib.pyplot as plt
 
 STATE_COUNT_THRESHOLD = 3
-PROCESS_TL_GROUND_TRUTH = True
+PROCESS_TL_GROUND_TRUTH = False
 
 class TLDetector(object):
     def __init__(self):
@@ -157,19 +157,19 @@ class TLDetector(object):
         #TODO implement
         return 0
 
-    def get_light_state(self, light):
+    def get_light_state(self):
         """Determines the current color of the traffic light
 
         Args:
             light (TrafficLight): light to classify
 
         Returns:
-            int: ID of traffic light color (specified in styx_msgs/TrafficLight)
+            int: State of traffic light (red, unknown)
 
         """
         if(not self.has_image):
             self.prev_light_loc = None
-            return False
+            return TrafficLight.UNKNOWN
 
         cv_image = self.bridge.imgmsg_to_cv2(self.camera_image, "bgr8")
 
@@ -188,18 +188,48 @@ class TLDetector(object):
         light = None
 
         # List of positions that correspond to the line to stop in front of for a given intersection
-        stop_line_positions = self.config['stop_line_positions']
-        if(self.pose):
-            car_position = self.get_closest_waypoint(self.pose.pose)
+        # stop_line_positions = self.config['stop_line_positions']
+        # if(self.pose):
+        #     car_position = self.get_closest_waypoint(self.pose.pose)
 
-        #TODO find the closest visible traffic light (if one exists)
+        ego_waypoint_ix = self.find_closest_waypoint_ix(self.pose,
+                                                        self.waypoints.waypoints)
 
-        if light:
-            state = self.get_light_state(light)
-            return light_wp, state
-        self.waypoints = None
-        return -1, TrafficLight.UNKNOWN
+        min_dist = 1e12
+        closest_light_ix = 0
+        closest_light_state = 0
 
+        return_light_ix = -1
+        return_light_state = TrafficLight.UNKNOWN
+        
+        # TODO: Fix wraparound
+        for light in self.lights_ix:
+            if(ego_waypoint_ix > light[1]):
+               continue;
+            dist_from_light = light[1] - ego_waypoint_ix
+            #rospy.loginfo("  ego_ix=%d, light_ix=%d", ego_waypoint_ix, light[1])
+            #rospy.loginfo("     min_dist=%d, dist_form_light=%d",
+            #              min_dist, dist_from_light)
+            if(min_dist > dist_from_light):
+               min_dist = dist_from_light
+               closest_light_ix = light[1]
+               closest_light_state = light[0].state
+
+        #rospy.loginfo(" Ego index: %d pos: x:%f, y:%f",
+        #              ego_waypoint_ix,
+        #              self.pose.pose.position.x,
+        #              self.pose.pose.position.y)
+
+        #rospy.loginfo(" Upcoming Light index: %d",
+        #              closest_light_ix)
+
+        # notify only if the lights are within a visible range.
+        if ((closest_light_ix - ego_waypoint_ix) < 150):
+            return_light_ix = closest_light_ix
+            return_light_state = self.get_light_state()
+
+        return return_light_ix, return_light_state
+    #===========================================================================
 
     # ==========================================================================
     # Auxillary functions to implement process tl from ground_truth
