@@ -13,28 +13,33 @@ ONE_MPH = 0.44704
 class Controller(object):
 
 	# Constructor
-    def __init__(self,
+    def __init__(
+        self,
     	sample_time,
     	decel_limit, vehicle_mass, wheel_radius, wheel_base, steer_ratio,
-    	min_speed, max_lat_accel, max_steer_angle):
+    	min_speed, max_lat_accel, max_steer_angle, fuel_capacity,
+        brake_deadband ):
 
-    	# attributes used to compute brake torque
+    	# attributes used to compute brake actuation
     	self.decel_limit = decel_limit
         self.vehicle_mass = vehicle_mass
         self.wheel_radius = wheel_radius
-        #self.fuel_capacity = fuel_capacity
+        self.brake_deadband = brake_deadband
+
+        self.brake_factor = abs(self.decel_limit)*self.wheel_radius*(
+        	self.vehicle_mass + fuel_capacity*GAS_DENSITY )
+        #rospy.loginfo('brake_factor : %f', self.brake_factor)
 
         # time of last cycle
         self.last_time = None
 
-        self.brake_factor = abs(self.decel_limit)*self.wheel_radius*(
-        	self.vehicle_mass )
-        	#self.vehicle_mass + self.fuel_capacity*GAS_DENSITY )
-
         # construct PID speed controller
+        #kp = 0.5
+        #ki = 0.0003
+        #kd = 0.04
         kp = 0.5
-        ki = 0.0003
-        kd = 0.04
+        ki = 0.
+        kd = 0.03
 
         # time between controller cycles if no latency [s]
         self.sample_time = sample_time
@@ -82,6 +87,11 @@ class Controller(object):
     	else:
     		brake = 0.
 
+        # avoid unnecessary braking
+        # (apply brake control deadband)
+        if brake < self.brake_deadband:
+            brake = 0.
+
     	# convert brake from % to torque [Nm]
     	# torque = acc*wheel_radius*vehicle_mass
     	# TBC that what is commanded is total torque and not torque per wheel
@@ -96,5 +106,12 @@ class Controller(object):
     	#rospy.loginfo(
     	#	'w_target: %f, w_current: %f, v_target: %f, v_current: %f, steer: %f deg',
     	#	w_target, w_current, v_target, v_current, math.degrees(steer))
+
+        #rospy.loginfo(
+        #    'v_target: %f, v_current: %f, dv: %f',
+        #    v_target, v_current, v_target-v_current)
+
+        #rospy.loginfo('throttle: %f, brake: %f, steer: %f',
+        #    throttle, brake/self.brake_factor, steer)
 
         return throttle, brake, steer

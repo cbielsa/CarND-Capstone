@@ -51,9 +51,9 @@ class DBWNode(object):
         min_speed = 0.5
 
         # Node state attributes
-        self.v_target = 0.        # target linear velocity [m/s]
-        self.w_target = 0.        # target angular velocity [rad/s]
-        self.v_current = 0.       # current (measured) linear velocity [m/s]
+        #self.v_target = 0.        # target linear velocity [m/s]
+        #self.w_target = 0.        # target angular velocity [rad/s]
+        #self.v_current = 0.       # current (measured) linear velocity [m/s]
         #self.w_current = 0.       # current (measured) angular velocity [rad/s]
         self.dbw_enabled = False  # is DBW enabled
         self.controller_freq = 10  # controller frequency [Hz] 
@@ -63,9 +63,18 @@ class DBWNode(object):
         tau = 8.  # the larger tau, the more filtering (slower response to changes)
         self.w_current_filter = LowPassFilter(tau, ts)
 
+        # construct low pass filter for linear velocity
+        ts  = 1.
+        tau = 2.  # the larger tau, the more filtering (slower response to changes)
+        self.v_current_filter = LowPassFilter(tau, ts)
+
+        ts  = 1.
+        tau = 3.  # the larger tau, the more filtering (slower response to changes)
+        self.v_target_filter = LowPassFilter(tau, ts)        
+
         ts  = 1.
         tau = 0.  # the larger tau, the more filtering (slower response to changes)
-        self.w_target_filter = LowPassFilter(tau, ts)        
+        self.w_target_filter = LowPassFilter(tau, ts) 
 
         # Construct publishers
         self.steer_pub = rospy.Publisher(
@@ -79,7 +88,8 @@ class DBWNode(object):
         self.controller = Controller(
             1./self.controller_freq,
             decel_limit, vehicle_mass, wheel_radius, wheel_base, steer_ratio,
-            min_speed, max_lat_accel, max_steer_angle)
+            min_speed, max_lat_accel, max_steer_angle, fuel_capacity,
+            brake_deadband)
 
         # Construct subscribers
         rospy.Subscriber('/twist_cmd', TwistStamped, self.twist_cmd_cb)
@@ -94,20 +104,23 @@ class DBWNode(object):
     def twist_cmd_cb(self, twistStamped):
 
         # update target state
-        self.v_target = twistStamped.twist.linear.x
-        self.w_target = twistStamped.twist.angular.z
+        #self.v_target = twistStamped.twist.linear.x
+        #self.w_target = twistStamped.twist.angular.z
 
-        self.w_target_filter.filt(self.w_target)
+        # pass target velocities to filters
+        self.v_target_filter.filt(twistStamped.twist.linear.x)
+        self.w_target_filter.filt(twistStamped.twist.angular.z)
         
-        #rospy.loginfo('Commanded v: %f, commanded w: %f', self.v_target, self.w_target)
-
 
     # Callback function for /current_velocity
     def current_velocity_cb(self, twistStamped):
         
         # update estimated speed (set to current measured value)
-        self.v_current = twistStamped.twist.linear.x
+        #self.v_current = twistStamped.twist.linear.x
         
+        # pass estimated speed to speed filter
+        self.v_current_filter.filt( twistStamped.twist.linear.x )
+
         # update estimated (filtered) angular rate
         #self.w_current = twistStamped.twist.angular.z
         self.w_current_filter.filt( twistStamped.twist.angular.z )
@@ -151,8 +164,8 @@ class DBWNode(object):
 
                 # call controller and publish actuations
                 throttle, brake, steer = self.controller.control(
-                    self.v_target, self.w_target_filter.get(), self.v_current,
-                    self.w_current_filter.get() )
+                    self.v_target_filter.get(), self.w_target_filter.get(),
+                    self.v_current_filter.get(), self.w_current_filter.get() )
 
                 self.publish(throttle, brake, steer)
 
