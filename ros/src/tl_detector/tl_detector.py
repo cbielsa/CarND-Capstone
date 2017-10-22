@@ -16,7 +16,7 @@ import random
 import matplotlib.pyplot as plt
 
 STATE_COUNT_THRESHOLD = 3
-PROCESS_TL_GROUND_TRUTH = False
+PROCESS_TL_GROUND_TRUTH = True
 
 class TLDetector(object):
 

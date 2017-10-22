@@ -67,9 +67,16 @@ class TLClassifier(object):
         lbl = self.category_index[print_classes[0]]['name']
         rospy.loginfo("Tensor flow classified label is %s", lbl)
         #print("classified label is ", lbl)
+        tl_state = TrafficLight.UNKNOWN
         if lbl == 'Red':
-            return TrafficLight.RED
+            tl_state = TrafficLight.RED
+        elif lbl == 'Yellow':
+            tl_state = TrafficLight.YELLOW
+        elif lbl == 'Green':
+            tl_state = TrafficLight.GREEN
         else:
-            return TrafficLight.UNKNOWN
+            tl_state = TrafficLight.UNKNOWN
+
+        return tl_state
 
         
