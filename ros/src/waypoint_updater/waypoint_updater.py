@@ -23,15 +23,17 @@ as well as to verify your TL classifier.
 TODO (for Yousuf and Aaron): Stopline location for each traffic light.
 '''
 
-LOOKAHEAD_WPS = 200 # Number of waypoints we will publish. You can change this number
+LOOKAHEAD_WPS = 60 # Number of waypoints we will publish. You can change this number
 MAX_SPEED  = 7.  # m/s
 MAX_ACC    = 9.  # m/s^2
-BRAKE_DECC = 3.  # decceleration used to stop car whenever possible [m/s^2]
+BRAKE_DECC = 2.  # decceleration used to stop car whenever possible [m/s^2]
 
 # Braking distance when ego is at maximum speed and brakes at max accel.
 MAX_BRAKE_DIST = MAX_SPEED*MAX_SPEED/(2.*BRAKE_DECC)
 
-MARGIN_TO_TL = 25.  # distance ahead of red light ego stops at [m]
+MARGIN_TO_TL = 25.               # distance ahead of red light ego tries to stop at [m]
+MARGIN_FOR_BRAKE_OVERSHOOT = 5.  # max distance after stop point ego may stop at [m]
+                                 # (due to PID characteristic time and latency)  
 
 class WaypointUpdater(object):
 
@@ -68,7 +70,7 @@ class WaypointUpdater(object):
         self.meas_pose = None
 
         # waypoint updater publishing frequency
-        self.freq = 2  # Hz
+        self.freq = 1  # Hz
         
         # Start waypoint updater loop
         self.loop()
@@ -97,8 +99,11 @@ class WaypointUpdater(object):
         pos = self.meas_pose.pose.position
 
         # calculate ego heading from last measured pose
-        heading = 2.*math.atan2(
-            self.meas_pose.pose.orientation.z, self.meas_pose.pose.orientation.w)
+        #heading = 2.*math.atan2(
+        #    self.meas_pose.pose.orientation.z, self.meas_pose.pose.orientation.w)
+
+        heading = self.get_heading_from_quaternion(self.meas_pose.pose.orientation)
+
 
         if time:
             # predict position at input time, using last measured velocity
@@ -130,20 +135,16 @@ class WaypointUpdater(object):
         return wp_index
 
 
-    def get_euler_from_quaternion(quaternion):
+    def get_heading_from_quaternion(self, quaternion):
 
-        # compute ego heading from quaternion
-        qx = quaternion.x
-        qy = quaternion.y
-        qz = quaternion.z
-        qw = quaternion.w
-        
+        # compute euler angles from quaternion
+        euler = tf.transformations.euler_from_quaternion(
+            #quaternion)
+            [quaternion.x, quaternion.y, quaternion.z, quaternion.w])
+
         #ego_heading = 2.*math.atan2(ego_qz, ego_qw)
-        euler = tf.transformations.euler_from_quaternion([qx,
-                                                          qy,
-                                                          qz,
-                                                          qw])
-        return euler
+
+        return euler[2]
 
 
     def is_behind_ego(self, ego_heading, other_heading):
@@ -235,10 +236,13 @@ class WaypointUpdater(object):
 
         # check input indices
         if final_wp_ix <= init_wp_ix:
-            rospy.loginfo(
+            rospy.logwarn(
                 "append_final_waypoints: final_wp_ix (%f) <= init_wp_ix (%d)",
                 final_wp_ix, init_wp_ix)
             return
+
+
+        #rospy.loginfo('append_final_waypoints ==========')
 
         # select acceleration ---
 
@@ -258,7 +262,7 @@ class WaypointUpdater(object):
             d = self.dist_ix(init_wp_ix, final_wp_ix)
 
             if d < 0.1:
-                rospy.loginfo(
+                rospy.logwarn(
                     "append_final_waypoints: too small distance between init_wp_ix (%d) and final_wp_ix (%f)",
                     init_wp_ix, final_wp_ix)
                 return
@@ -278,7 +282,6 @@ class WaypointUpdater(object):
         v2 = v*v
 
         #first_iter = True
-        first_iter = False
 
         final_vel_reached = False
 
@@ -287,11 +290,7 @@ class WaypointUpdater(object):
             # get base waypoint
             wp = self.base_waypoints.waypoints[i]
 
-            if first_iter:
-
-                first_iter = False
-
-            elif not final_vel_reached:
+            if not final_vel_reached:
 
                 # calculate distance from previous waypoint
                 d = self.dist_ix(i-1, i)
@@ -314,6 +313,12 @@ class WaypointUpdater(object):
 
             # append waypoint
             self.final_waypoints.waypoints.append(wp)
+
+            #rospy.loginfo('v: %f', wp.twist.twist.linear.x )
+
+        #rospy.loginfo('================================================' )
+
+            
 
 
     # calculate index of wp in front of the wp with index target_wp_ix
@@ -356,13 +361,26 @@ class WaypointUpdater(object):
                 init_wp_ix = ego_next_wp_ix
                 init_velocity = self.current_velocity
 
+                # flags indicating whether there is a red light ahead
+                # and whether ego is in the middle of a crossroads
+                # (after stop point but before red light)
+                red_light_ahead = False
+                in_middle_of_crossroads = False
+
                 # if red light in planning horizon
                 if( self.next_red_tl_wp_ix
                     and 0 < self.next_red_tl_wp_ix-ego_next_wp_ix < LOOKAHEAD_WPS ):
 
-                    # set target stop point to MARGIN_TO_TL meters before traffic light
+                    # set flag to red light ahead
+                    red_light_ahead = True
+
+                    # find wp index of start point of crossroads
+                    start_crossroads_wp_ix = self.find_wp_at_distance_in_front(
+                        self.next_red_tl_wp_ix, MARGIN_TO_TL-MARGIN_FOR_BRAKE_OVERSHOOT)
+
+                    # find wp index of target stop point: MARGIN_TO_TL meters before traffic light
                     stop_wp_ix = self.find_wp_at_distance_in_front(
-                        self.next_red_tl_wp_ix, MARGIN_TO_TL)
+                        start_crossroads_wp_ix, MARGIN_FOR_BRAKE_OVERSHOOT)
 
                     # identify wp at which ego shall start braking
                     start_brake_wp_ix = self.find_wp_at_distance_in_front(
@@ -370,7 +388,7 @@ class WaypointUpdater(object):
 
                     # if there is some distance up to the point where braking shall start,
                     # advance car up to that point targeting max speed
-                    if start_brake_wp_ix > ego_next_wp_ix:
+                    if ego_next_wp_ix < start_brake_wp_ix:
 
                         # set target velocity to max velocity
                         # and target waypoint to position at which ego shall start to brake
@@ -391,14 +409,14 @@ class WaypointUpdater(object):
                             target_velocity, stop_wp_ix-ego_next_wp_ix)
 
 
-                    # stop in front of the red light
-                    
-                    # set target velocity to zero
-                    # and target waypoint to stop point ahead of traffic light
-                    target_wp_ix = stop_wp_ix
-                    target_velocity = 0.
+                    # if stop point in front of init ego point,
+                    # stop ego at stop point in front of red light
+                    if init_wp_ix < stop_wp_ix:
 
-                    if target_wp_ix > init_wp_ix:
+                        # set target velocity to zero
+                        # and target waypoint to stop point ahead of traffic light
+                        target_wp_ix = stop_wp_ix
+                        target_velocity = 0.
 
                         # calculate and append waypoints from init to target state
                         self.append_final_waypoints(
@@ -406,21 +424,33 @@ class WaypointUpdater(object):
                             target_wp_ix, target_velocity,
                             False)  # stop exactly at target_wp_ix, not before
 
-                        if start_brake_wp_ix <= ego_next_wp_ix:
+                        if ego_next_wp_ix >= start_brake_wp_ix:
                             rospy.loginfo(
                                 "Red light close ahead, guiding to a stop in %d wps",
                                 stop_wp_ix-ego_next_wp_ix)
 
+                    # case ego is between start of crossroads and red light,
+                    # get out of there!
+                    elif init_wp_ix > start_crossroads_wp_ix:
+
+                        # ego is in the midle of crossroads, get out of there!
+                        in_middle_of_crossroads = True
+
+                        rospy.loginfo(
+                            "Red light close ahead at %d wps, ego in the middle of crossroads, guiding to %f m/s",
+                            self.next_red_tl_wp_ix-ego_next_wp_ix, target_velocity)
+
+                    # case ego is after nominal stop point but before start of crossroads:
+                    # stay there until green light
                     else:
                         rospy.loginfo(
-                            "Red light close ahead at %d wps, stop point overshot, just stay there :S",
+                            "Red light close ahead at %d wps, ego stopped before crossroads, stay there",
                             self.next_red_tl_wp_ix-ego_next_wp_ix)
 
 
-
-                # if no red light ahead or stop point was overshot:
+                # if no red light ahead or in the middle of crossroads:
                 # progress targetting maximum speed
-                else:
+                if (not red_light_ahead) or in_middle_of_crossroads:
 
                     # set target velocity to max velocity
                     # and target waypoint LOOKAHEAD_WPS waypoints ahead of ego
@@ -432,13 +462,12 @@ class WaypointUpdater(object):
                         init_wp_ix, init_velocity,
                         target_wp_ix, target_velocity)
 
-                    rospy.loginfo(
-                        "No red light ahead, guiding to %f m/s", target_velocity)
+                    if not red_light_ahead:
+                        rospy.loginfo(
+                            "No red light ahead, guiding to %f m/s", target_velocity)
 
 
                 # publish to topic final_waypoints
-                #rospy.loginfo("Publishing %d waypoints...",
-                #    len(self.final_waypoints.waypoints) )
                 self.final_waypoints_pub.publish(self.final_waypoints)
 
             # sleep until next control cycle
