@@ -9,14 +9,20 @@ import rospy
 import sys
 import label_map_util as label_map_util
 
+USE_SIM_IMAGES = True
+
 CURR_PATH = os.path.dirname(os.path.realpath(__file__))
 # Model used
 MODEL_NAME = 'ssd_inception_v2_coco_11_06_2017'
-# Path to frozen detection graph. This is the actual model that is used for the object detection.
-PATH_TO_CKPT = CURR_PATH + '/tl_model_sim/output_inference_graph/frozen_inference_graph.pb'
-# List of the strings that is used to add correct label for each box.
-PATH_TO_LABELS = CURR_PATH + '/tl_model_sim/tl_label_map.pbtxt'
 NUM_CLASSES = 4
+
+# Path to frozen detection graph. This is the actual model that is used for the object detection.
+PATH_TO_CKPT = CURR_PATH + '/tl_model_sim/output_inference_graph/frozen_inference_graph.pb' if USE_SIM_IMAGES else \
+               CURR_PATH + '/tl_model_real/output_inference_graph/frozen_inference_graph.pb'
+# List of the strings that is used to add correct label for each box.
+PATH_TO_LABELS = CURR_PATH + '/tl_model_sim/tl_label_map.pbtxt' if USE_SIM_IMAGES else \
+                 CURR_PATH + '/tl_model_real/tl_label_map.pbtxt'
+
 
 class TLClassifier(object):
     def __init__(self):
