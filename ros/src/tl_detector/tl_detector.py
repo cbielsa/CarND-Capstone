@@ -16,7 +16,7 @@ import random
 import matplotlib.pyplot as plt
 
 STATE_COUNT_THRESHOLD = 3
-PROCESS_TL_GROUND_TRUTH = False
+PROCESS_TL_GROUND_TRUTH = True
 
 class TLDetector(object):
 
@@ -56,10 +56,11 @@ class TLDetector(object):
         self.bridge = CvBridge()
 
         # construct TL classifier
+        self.light_classifier = None
         if not PROCESS_TL_GROUND_TRUTH:
             self.light_classifier = TLClassifier()
         else:
-            self.light_classifier = None
+            self.light_classifier = 1  # anything != None
 
         self.listener = tf.TransformListener()
 
@@ -73,7 +74,7 @@ class TLDetector(object):
 
     def initialized(self):
 
-        if self.waypoints:
+        if self.waypoints and self.light_classifier:
             return True
         else:
             return False
