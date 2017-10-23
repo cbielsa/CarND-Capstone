@@ -23,16 +23,22 @@ as well as to verify your TL classifier.
 TODO (for Yousuf and Aaron): Stopline location for each traffic light.
 '''
 
-LOOKAHEAD_WPS = 60 # Number of waypoints we will publish. You can change this number
-MAX_SPEED  = 7.  # m/s
+# Number of waypoints we will publish. You can change this number
+LOOKAHEAD_WPS = 150 
+
+# Max allowed speed (limit set by waypoint_loader - 1 m/s margin)
+MAX_SPEED  = rospy.get_param('/waypoint_loader/velocity') *1000/3600  # m/s
+rospy.loginfo('MAX_SPEED : ', MAX_SPEED)
+
 MAX_ACC    = 9.  # m/s^2
-BRAKE_DECC = 2.  # decceleration used to stop car whenever possible [m/s^2]
+BRAKE_DECC = 2.  # nominal decceleration used to stop car [m/s^2]
+                 # (ego will be braked at up to MAX_ACC if light suddently turns red)
 
 # Braking distance when ego is at maximum speed and brakes at max accel.
 MAX_BRAKE_DIST = MAX_SPEED*MAX_SPEED/(2.*BRAKE_DECC)
 
 MARGIN_TO_TL = 25.               # distance ahead of red light ego tries to stop at [m]
-MARGIN_FOR_BRAKE_OVERSHOOT = 5.  # max distance after stop point ego may stop at [m]
+MARGIN_FOR_BRAKE_OVERSHOOT = 7.  # max distance after stop point ego may stop at [m]
                                  # (due to PID characteristic time and latency)  
 
 class WaypointUpdater(object):
@@ -139,10 +145,7 @@ class WaypointUpdater(object):
 
         # compute euler angles from quaternion
         euler = tf.transformations.euler_from_quaternion(
-            #quaternion)
             [quaternion.x, quaternion.y, quaternion.z, quaternion.w])
-
-        #ego_heading = 2.*math.atan2(ego_qz, ego_qw)
 
         return euler[2]
 
@@ -242,8 +245,6 @@ class WaypointUpdater(object):
             return
 
 
-        #rospy.loginfo('append_final_waypoints ==========')
-
         # select acceleration ---
 
         # case max acceleration
@@ -281,8 +282,6 @@ class WaypointUpdater(object):
         v  = init_velocity
         v2 = v*v
 
-        #first_iter = True
-
         final_vel_reached = False
 
         for i in range( init_wp_ix, final_wp_ix ):
@@ -313,12 +312,6 @@ class WaypointUpdater(object):
 
             # append waypoint
             self.final_waypoints.waypoints.append(wp)
-
-            #rospy.loginfo('v: %f', wp.twist.twist.linear.x )
-
-        #rospy.loginfo('================================================' )
-
-            
 
 
     # calculate index of wp in front of the wp with index target_wp_ix
@@ -436,10 +429,7 @@ class WaypointUpdater(object):
                         # ego is in the midle of crossroads, get out of there!
                         in_middle_of_crossroads = True
 
-                        rospy.loginfo(
-                            "Red light close ahead at %d wps, ego in the middle of crossroads, guiding to %f m/s",
-                            self.next_red_tl_wp_ix-ego_next_wp_ix, target_velocity)
-
+ 
                     # case ego is after nominal stop point but before start of crossroads:
                     # stay there until green light
                     else:
@@ -465,7 +455,10 @@ class WaypointUpdater(object):
                     if not red_light_ahead:
                         rospy.loginfo(
                             "No red light ahead, guiding to %f m/s", target_velocity)
-
+                    elif in_middle_of_crossroads:
+                        rospy.loginfo(
+                            "Red light close ahead at %d wps, ego in the middle of crossroads, guiding to %f m/s",
+                            self.next_red_tl_wp_ix-ego_next_wp_ix, target_velocity)
 
                 # publish to topic final_waypoints
                 self.final_waypoints_pub.publish(self.final_waypoints)
@@ -509,7 +502,6 @@ class WaypointUpdater(object):
     def dist(self, p1, p2):
         x, y, z = p1.x - p2.x, p1.y - p2.y, p1.z - p2.z
         return math.sqrt(x*x + y*y + z*z)
-
 
 
     # Print auxiliary functions
