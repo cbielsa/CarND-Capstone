@@ -16,7 +16,7 @@ import random
 import matplotlib.pyplot as plt
 
 STATE_COUNT_THRESHOLD = 3
-PROCESS_TL_GROUND_TRUTH = True
+PROCESS_TL_GROUND_TRUTH = False
 
 class TLDetector(object):
 
@@ -54,7 +54,13 @@ class TLDetector(object):
         self.upcoming_red_light_pub = rospy.Publisher('/traffic_waypoint', Int32, queue_size=1)
 
         self.bridge = CvBridge()
-        self.light_classifier = TLClassifier()
+
+        # construct TL classifier
+        if not PROCESS_TL_GROUND_TRUTH:
+            self.light_classifier = TLClassifier()
+        else:
+            self.light_classifier = None
+
         self.listener = tf.TransformListener()
 
         self.state = TrafficLight.UNKNOWN
