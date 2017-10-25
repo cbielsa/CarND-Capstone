@@ -1,2 +1,0 @@
-model_checkpoint_path: "/home/ajay/ML/models/research/object_detection/tl_model/output_inference_graph/model.ckpt"
-all_model_checkpoint_paths: "/home/ajay/ML/models/research/object_detection/tl_model/output_inference_graph/model.ckpt"
