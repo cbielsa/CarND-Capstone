@@ -60,6 +60,7 @@ class WaypointUpdater(object):
         # other member variables
         self.base_waypoints = None
         self.final_waypoints = None
+        self.base_waypoints_s = [] # base_waypoints segment numbers
 
         # index of closest waypoint to red light
         # (set to none if no red light in front of car)
@@ -211,6 +212,15 @@ class WaypointUpdater(object):
             #rospy.loginfo('Copying base_waypoints...')
             self.base_waypoints = waypoints
 
+            self.base_waypoints_s.append(0)
+
+            rospy.loginfo('Computing base_waypoint segments...')
+            for ix in range(len(waypoints.waypoints)-1):
+                self.base_waypoints_s.append(self.dist_ix(ix, ix+1))
+        
+            for ix in range(len(self.base_waypoints_s)-1):
+                self.base_waypoints_s[ix+1] += self.base_waypoints_s[ix]
+
 
     # Callback function for /traffic_waypoint message 
     def traffic_cb(self, msg):
@@ -226,6 +236,8 @@ class WaypointUpdater(object):
 
         self.traffic_received = True
 
+    def dist_between_waypoints(self, ix1, ix2):
+        return (self.base_waypoints_s[ix2] - self.base_waypoints_s[ix1])
 
     # Append to self.final_waypoints, waypoints to connect an initial state
     # to a final state (including wp for initial state but excluding final state)
@@ -260,7 +272,7 @@ class WaypointUpdater(object):
 
             # calculate distance between init and final position,
             # along driving path
-            d = self.dist_ix(init_wp_ix, final_wp_ix)
+            d = self.dist_between_waypoints(init_wp_ix, final_wp_ix)
 
             if d < 0.1:
                 rospy.logwarn(
@@ -292,17 +304,17 @@ class WaypointUpdater(object):
             if not final_vel_reached:
 
                 # calculate distance from previous waypoint
-                d = self.dist_ix(i-1, i)
+                d = self.dist_between_waypoints(i-1, i)
 
                 # propagate velocity from previous waypoint
                 v2 += 2.*acc*d
-                if v2 > 0.:
+                if (v2 > 0.):
                     v = math.sqrt( v2 )
                 else:
                     v = 0.
 
                 # check whether target velocity has been reached
-                if (acc>0. and v>final_velocity) or (acc<0. and v<final_velocity):
+                if (acc>0. and v>=final_velocity) or (acc<0. and v<=final_velocity):
                     v = final_velocity
                     final_vel_reached = True
 
@@ -340,7 +352,7 @@ class WaypointUpdater(object):
     def find_wp_at_distance_in_front(self, target_wp_ix, d):
 
         ix = target_wp_ix-1
-        while self.dist_ix(ix, target_wp_ix) < d:
+        while self.dist_between_waypoints(ix, target_wp_ix) < d:
             ix -= 1
 
         return ix
@@ -358,7 +370,7 @@ class WaypointUpdater(object):
             if self.initialized():
 
                 # initialise final waypoints (guidance)
-                self.final_waypoints = Lane()
+                #self.final_waypoints = Lane()
 
                 # get current time (class rospy.Time)
                 t = rospy.get_rostime()
@@ -396,9 +408,21 @@ class WaypointUpdater(object):
                     stop_wp_ix = self.find_wp_at_distance_in_front(
                         start_crossroads_wp_ix, MARGIN_FOR_BRAKE_OVERSHOOT)
 
+                    curr_brake_dist = self.current_velocity * self.current_velocity/(2.*BRAKE_DECC)
+                    
                     # identify wp at which ego shall start braking
                     start_brake_wp_ix = self.find_wp_at_distance_in_front(
-                        stop_wp_ix, MAX_BRAKE_DIST)
+                        stop_wp_ix, curr_brake_dist)
+
+                    #rospy.loginfo(
+                    #    "Red light! ego_wpix=%d, rl_wpix=%d, cross_rds_wpix=%d, stop_wpix=%d",
+                    #    ego_next_wp_ix, self.next_red_tl_wp_ix,
+                    #    start_crossroads_wp_ix, stop_wp_ix)
+                    
+                    #rospy.loginfo(
+                    #    "           start_brk_wpix=%d, curr_vel=%f, brake_dist=%f",
+                    #    start_brake_wp_ix, self.current_velocity, curr_brake_dist)
+                    
 
                     # if there is some distance up to the point where braking shall start,
                     # advance car up to that point targeting max speed
@@ -408,7 +432,8 @@ class WaypointUpdater(object):
                         # and target waypoint to position at which ego shall start to brake
                         target_wp_ix = start_brake_wp_ix
                         target_velocity = MAX_SPEED
-
+                        
+                        self.final_waypoints = Lane()
                         # calculate and append waypoints from init to target state
                         self.append_final_waypoints(
                             init_wp_ix, init_velocity,
@@ -426,12 +451,14 @@ class WaypointUpdater(object):
                     # if stop point in front of init ego point,
                     # stop ego at stop point in front of red light
                     if init_wp_ix < stop_wp_ix:
-
+                        
+                        
                         # set target velocity to zero
                         # and target waypoint to stop point ahead of traffic light
                         target_wp_ix = stop_wp_ix
                         target_velocity = 0.
 
+                        self.final_waypoints = Lane()
                         # calculate and append waypoints from init to target state
                         self.append_final_waypoints(
                             init_wp_ix, init_velocity,
@@ -468,6 +495,7 @@ class WaypointUpdater(object):
                     target_wp_ix = ego_next_wp_ix + LOOKAHEAD_WPS
                     target_velocity = MAX_SPEED
 
+                    self.final_waypoints = Lane()
                     # calculate and append waypoints from init to target state
                     self.append_final_waypoints(
                         init_wp_ix, init_velocity,

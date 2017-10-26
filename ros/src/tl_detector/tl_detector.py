@@ -16,7 +16,7 @@ import random
 import matplotlib.pyplot as plt
 
 STATE_COUNT_THRESHOLD = 3
-PROCESS_TL_GROUND_TRUTH = True
+PROCESS_TL_GROUND_TRUTH = False
 
 class TLDetector(object):
 
@@ -74,7 +74,7 @@ class TLDetector(object):
 
     def initialized(self):
 
-        if self.waypoints and self.light_classifier:
+        if self.waypoints and self.light_classifier and self.pose:
             return True
         else:
             return False
