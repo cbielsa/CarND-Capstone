@@ -51,22 +51,17 @@ class DBWNode(object):
         min_speed = 0.5
 
         # Node state attributes
-        #self.v_target = 0.        # target linear velocity [m/s]
-        #self.w_target = 0.        # target angular velocity [rad/s]
-        #self.v_current = 0.       # current (measured) linear velocity [m/s]
-        #self.w_current = 0.       # current (measured) angular velocity [rad/s]
-        self.dbw_enabled = False  # is DBW enabled
+        self.dbw_enabled = False   # is DBW enabled
         self.controller_freq = 10  # controller frequency [Hz] 
 
-        # construct low pass filter for angular rate measurements
-        ts  = 1.
-        tau = 8.  # the larger tau, the more filtering (slower response to changes)
-        self.w_current_filter = LowPassFilter(tau, ts)
-
-        # construct low pass filter for linear velocity
+        # construct low pass filter for linear and angular current and target velocities
         ts  = 1.
         tau = 2.  # the larger tau, the more filtering (slower response to changes)
         self.v_current_filter = LowPassFilter(tau, ts)
+
+        ts  = 1.
+        tau = 8.  # the larger tau, the more filtering (slower response to changes)
+        self.w_current_filter = LowPassFilter(tau, ts)
 
         ts  = 1.
         tau = 3.  # the larger tau, the more filtering (slower response to changes)
@@ -103,10 +98,6 @@ class DBWNode(object):
     # Callback function for /twist_cmd
     def twist_cmd_cb(self, twistStamped):
 
-        # update target state
-        #self.v_target = twistStamped.twist.linear.x
-        #self.w_target = twistStamped.twist.angular.z
-
         # pass target velocities to filters
         self.v_target_filter.filt(twistStamped.twist.linear.x)
         self.w_target_filter.filt(twistStamped.twist.angular.z)
@@ -115,24 +106,11 @@ class DBWNode(object):
     # Callback function for /current_velocity
     def current_velocity_cb(self, twistStamped):
         
-        # update estimated speed (set to current measured value)
-        #self.v_current = twistStamped.twist.linear.x
-        
         # pass estimated speed to speed filter
         self.v_current_filter.filt( twistStamped.twist.linear.x )
 
         # update estimated (filtered) angular rate
-        #self.w_current = twistStamped.twist.angular.z
         self.w_current_filter.filt( twistStamped.twist.angular.z )
-
-        #rospy.loginfo('Measured v: %f, %f, %f, measured w: %f, %f, %f',
-        #    self.v_current,
-        #    twistStamped.twist.linear.y,
-        #    twistStamped.twist.linear.z,
-        #    twistStamped.twist.angular.x,
-        #    twistStamped.twist.angular.y,
-        #    self.w_current
-        #    )
 
 
     # Callback function for /vehicle/dbw_enabled
@@ -148,6 +126,12 @@ class DBWNode(object):
             
             # reset integral state of PID speed controller
             self.controller.reset()
+
+            # reset filters
+            self.v_current_filter.reset()
+            self.w_current_filter.reset()
+            self.v_target_filter.reset()
+            self.w_target_filter.reset()
 
             # set DBW status to disabled
             self.dbw_enabled = False
@@ -194,4 +178,7 @@ class DBWNode(object):
 
 
 if __name__ == '__main__':
-    DBWNode()
+    try:
+        DBWNode()
+    except rospy.ROSInterruptException:
+        rospy.logerr('Could not start DBW node.')
