@@ -42,7 +42,7 @@ MARGIN_TO_TL = 23.               # distance ahead of red light ego tries to stop
 MARGIN_FOR_BRAKE_OVERSHOOT = 7.  # max distance after stop point ego may stop at [m]
                                  # (due to PID characteristic time and latency)  
 
-VEL_THRESHOLD_FOR_YELLOW = 3. #m/s
+VEL_THRESHOLD_FOR_YELLOW = 3. # m/s
 
 class WaypointUpdater(object):
 
@@ -111,8 +111,6 @@ class WaypointUpdater(object):
         pos = self.meas_pose.pose.position
 
         # calculate ego heading from last measured pose
-        #heading = 2.*math.atan2(
-        #    self.meas_pose.pose.orientation.z, self.meas_pose.pose.orientation.w)
         heading = self.get_heading_from_quaternion(self.meas_pose.pose.orientation)
 
         if time:
@@ -442,7 +440,6 @@ class WaypointUpdater(object):
                                         
                         target_velocity = MAX_SPEED
                         
-                        #self.final_waypoints = Lane()
                         # calculate and append waypoints from init to target state
                         self.append_final_waypoints(
                             init_wp_ix, init_velocity,
@@ -468,7 +465,6 @@ class WaypointUpdater(object):
                                         else (init_wp_ix + LOOKAHEAD_WPS))
                         target_velocity = 0.
 
-                        #self.final_waypoints = Lane()
                         # calculate and append waypoints from init to target state
                         self.append_final_waypoints(
                             init_wp_ix, init_velocity,
@@ -552,18 +548,6 @@ class WaypointUpdater(object):
 #    def obstacle_cb(self, msg):
         # TODO: Callback for /obstacle_waypoint message. We will implement it later
 #        pass
-
-
-    # Get waypoint velocity from message
-    # (a scalar, along X in vehcile frame)
-    #def get_waypoint_velocity(self, waypoint):
-    #    return waypoint.twist.twist.linear.x
-
-
-    # Set waypoint velocity to message
-    # (a scalar, along X in vehcile frame)
-    #def set_waypoint_velocity(self, waypoints, waypoint, velocity):
-    #    waypoints[waypoint].twist.twist.linear.x = velocity
 
 
     # Print auxiliary functions

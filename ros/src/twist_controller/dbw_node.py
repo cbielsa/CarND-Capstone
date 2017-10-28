@@ -127,12 +127,6 @@ class DBWNode(object):
             # reset integral state of PID speed controller
             self.controller.reset()
 
-            # reset filters
-            self.v_current_filter.reset()
-            self.w_current_filter.reset()
-            self.v_target_filter.reset()
-            self.w_target_filter.reset()
-
             # set DBW status to disabled
             self.dbw_enabled = False
             rospy.loginfo('DBW disabled')
