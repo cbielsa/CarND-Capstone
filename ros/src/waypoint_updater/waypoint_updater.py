@@ -38,7 +38,7 @@ BRAKE_DECC = 2.  # nominal decceleration used to stop car [m/s^2]
 # Braking distance when ego is at maximum speed and brakes at nominal decceleration
 MAX_BRAKE_DIST = MAX_SPEED*MAX_SPEED/(2.*BRAKE_DECC)
 
-MARGIN_TO_TL = 23.               # distance ahead of red light ego tries to stop at [m]
+MARGIN_TO_TL = 0.                # distance ahead of red light ego tries to stop at [m]
 MARGIN_FOR_BRAKE_OVERSHOOT = 7.  # max distance after stop point ego may stop at [m]
                                  # (due to PID characteristic time and latency)  
 
@@ -60,7 +60,7 @@ class WaypointUpdater(object):
 
         # Construct publisher
         self.final_waypoints_pub = rospy.Publisher(
-            '/final_waypoints', Lane, queue_size=1)
+            '/final_waypoints', Lane, queue_size=60)
 
         # other member variables
         self.base_waypoints = None

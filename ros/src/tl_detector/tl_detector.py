@@ -242,30 +242,22 @@ class TLDetector(object):
         return_light_state = TrafficLight.UNKNOWN
         
         # TODO: Fix wraparound
-        for light in self.lights_ix:
-            if(ego_waypoint_ix > light[1]):
-               continue;
-            dist_from_light = light[1] - ego_waypoint_ix
-            #rospy.loginfo("  ego_ix=%d, light_ix=%d", ego_waypoint_ix, light[1])
-            #rospy.loginfo("     min_dist=%d, dist_form_light=%d",
-            #              min_dist, dist_from_light)
-            if(min_dist > dist_from_light):
-               min_dist = dist_from_light
-               closest_light_ix = light[1]
-               closest_light_state = light[0].state
+        for light_wp_ix in self.tl_nearest_wps:
+            if(ego_waypoint_ix > light_wp_ix):
+                continue
+            closest_light_ix = light_wp_ix
+            break
+        
+        rospy.loginfo(" Ego index: %d pos: x:%f, y:%f",
+                      ego_waypoint_ix,
+                      self.pose.pose.position.x,
+                      self.pose.pose.position.y)
 
-        #rospy.loginfo(" Ego index: %d pos: x:%f, y:%f",
-        #              ego_waypoint_ix,
-        #              self.pose.pose.position.x,
-        #              self.pose.pose.position.y)
+        rospy.loginfo(" Upcoming Light index: %d",
+                      closest_light_ix)
 
-        #rospy.loginfo(" Upcoming Light index: %d",
-        #              closest_light_ix)
-
-        # notify only if the lights are within a visible range.
-        if ((closest_light_ix - ego_waypoint_ix) < 150):
-            return_light_ix = closest_light_ix
-            return_light_state = self.get_light_state()
+        return_light_ix = closest_light_ix
+        return_light_state = self.get_light_state()
 
         return return_light_ix, return_light_state
     #===========================================================================
@@ -293,20 +285,20 @@ class TLDetector(object):
 
                 # Find and save index of every light
                 
-                #rospy.loginfo(" Light:%d", ix);
-                #rospy.loginfo("   Light state=%d", light.state)
-                #rospy.loginfo("   (unknown=%d, green=%d, yellow=%d, red=%d)",
-                #              light.UNKNOWN, light.GREEN, light.YELLOW, light.RED)
-                #rospy.loginfo("   Pose msg:")
-                #rospy.loginfo("      position: x:%f y:%f z:%f",
-                #              light.pose.pose.position.x,
-                #              light.pose.pose.position.y,
-                #              light.pose.pose.position.z);
-                #rospy.loginfo("      orientation: x:%f y:%f z:%f w:%f",
-                #              light.pose.pose.orientation.x,
-                #              light.pose.pose.orientation.y,
-                #              light.pose.pose.orientation.z,
-                #              light.pose.pose.orientation.w);
+                rospy.loginfo(" Light:%d", ix);
+                rospy.loginfo("   Light state=%d", light.state)
+                rospy.loginfo("   (unknown=%d, green=%d, yellow=%d, red=%d)",
+                              light.UNKNOWN, light.GREEN, light.YELLOW, light.RED)
+                rospy.loginfo("   Pose msg:")
+                rospy.loginfo("      position: x:%f y:%f z:%f",
+                              light.pose.pose.position.x,
+                              light.pose.pose.position.y,
+                              light.pose.pose.position.z);
+                rospy.loginfo("      orientation: x:%f y:%f z:%f w:%f",
+                              light.pose.pose.orientation.x,
+                              light.pose.pose.orientation.y,
+                              light.pose.pose.orientation.z,
+                              light.pose.pose.orientation.w);
 
                 light_ix = []
                 light_ix.append(light)
