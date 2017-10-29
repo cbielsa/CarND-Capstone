@@ -248,13 +248,13 @@ class TLDetector(object):
             closest_light_ix = light_wp_ix
             break
         
-        rospy.loginfo(" Ego index: %d pos: x:%f, y:%f",
-                      ego_waypoint_ix,
-                      self.pose.pose.position.x,
-                      self.pose.pose.position.y)
+        #rospy.loginfo(" Ego index: %d pos: x:%f, y:%f",
+        #              ego_waypoint_ix,
+        #              self.pose.pose.position.x,
+        #              self.pose.pose.position.y)
 
-        rospy.loginfo(" Upcoming Light index: %d",
-                      closest_light_ix)
+        #rospy.loginfo(" Upcoming Light index: %d",
+        #              closest_light_ix)
 
         return_light_ix = closest_light_ix
         return_light_state = self.get_light_state()
@@ -285,20 +285,20 @@ class TLDetector(object):
 
                 # Find and save index of every light
                 
-                rospy.loginfo(" Light:%d", ix);
-                rospy.loginfo("   Light state=%d", light.state)
-                rospy.loginfo("   (unknown=%d, green=%d, yellow=%d, red=%d)",
-                              light.UNKNOWN, light.GREEN, light.YELLOW, light.RED)
-                rospy.loginfo("   Pose msg:")
-                rospy.loginfo("      position: x:%f y:%f z:%f",
-                              light.pose.pose.position.x,
-                              light.pose.pose.position.y,
-                              light.pose.pose.position.z);
-                rospy.loginfo("      orientation: x:%f y:%f z:%f w:%f",
-                              light.pose.pose.orientation.x,
-                              light.pose.pose.orientation.y,
-                              light.pose.pose.orientation.z,
-                              light.pose.pose.orientation.w);
+                #rospy.loginfo(" Light:%d", ix);
+                #rospy.loginfo("   Light state=%d", light.state)
+                #rospy.loginfo("   (unknown=%d, green=%d, yellow=%d, red=%d)",
+                #              light.UNKNOWN, light.GREEN, light.YELLOW, light.RED)
+                #rospy.loginfo("   Pose msg:")
+                #rospy.loginfo("      position: x:%f y:%f z:%f",
+                #              light.pose.pose.position.x,
+                #              light.pose.pose.position.y,
+                #              light.pose.pose.position.z);
+                #rospy.loginfo("      orientation: x:%f y:%f z:%f w:%f",
+                #              light.pose.pose.orientation.x,
+                #              light.pose.pose.orientation.y,
+                #              light.pose.pose.orientation.z,
+                #              light.pose.pose.orientation.w);
 
                 light_ix = []
                 light_ix.append(light)
@@ -307,7 +307,7 @@ class TLDetector(object):
 
                 self.lights_ix.append(light_ix)
                 
-                rospy.loginfo("      Waypoint Index: %d", light_wp)
+                #rospy.loginfo("      Waypoint Index: %d", light_wp)
 
             self.lights_indices = True
         
