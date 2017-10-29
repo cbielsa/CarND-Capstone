@@ -3,7 +3,6 @@
 import rospy
 from pid import PID
 from yaw_controller import YawController
-from lowpass import LowPassFilter
 import math
 
 GAS_DENSITY = 2.858
@@ -26,20 +25,17 @@ class Controller(object):
         self.wheel_radius = wheel_radius
         self.brake_deadband = brake_deadband
 
+        # Brake factor: converts from [0,1] range to torque [N*m]
         self.brake_factor = abs(self.decel_limit)*self.wheel_radius*(
         	self.vehicle_mass + fuel_capacity*GAS_DENSITY )
-        #rospy.loginfo('brake_factor : %f', self.brake_factor)
 
         # time of last cycle
         self.last_time = None
 
         # construct PID speed controller
-        #kp = 0.5
-        #ki = 0.0003
-        #kd = 0.04
-        kp = 0.5
-        ki = 0.
-        kd = 0.03
+        kp = 0.6
+        ki = 0.0005
+        kd = 0.05
 
         # time between controller cycles if no latency [s]
         self.sample_time = sample_time
@@ -49,10 +45,6 @@ class Controller(object):
         self.yaw_controller = YawController(
           	wheel_base, steer_ratio, min_speed, max_lat_accel, max_steer_angle)
 
-        # construct low pass filter for steering control
-        #ts  = 1.
-        #tau = 5.  # the larger tau, the more filtering (slower response to changes)
-        #self.steer_filter = LowPassFilter(tau, ts)
 
 
     # Reset controller
@@ -99,19 +91,6 @@ class Controller(object):
     		brake = brake*self.brake_factor
 
     	# calculate steering actuation with yaw controller [rad]
-
-    	#w_target = self.w_target_filter.filt(w_target)
     	steer = self.yaw_controller.get_steering(v_target, w_target, v_current)
-
-    	#rospy.loginfo(
-    	#	'w_target: %f, w_current: %f, v_target: %f, v_current: %f, steer: %f deg',
-    	#	w_target, w_current, v_target, v_current, math.degrees(steer))
-
-        #rospy.loginfo(
-        #    'v_target: %f, v_current: %f, dv: %f',
-        #    v_target, v_current, v_target-v_current)
-
-        #rospy.loginfo('throttle: %f, brake: %f, steer: %f',
-        #    throttle, brake/self.brake_factor, steer)
 
         return throttle, brake, steer
