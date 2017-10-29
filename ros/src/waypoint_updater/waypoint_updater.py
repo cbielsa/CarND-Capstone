@@ -23,9 +23,7 @@ as well as to verify your TL classifier.
 
 
 # Number of waypoints we will publish. You can change this number
-LOOKAHEAD_WPS = 30
-
-LOOKAHEAD_WPS_FOR_TL = 150 
+LOOKAHEAD_WPS = 150
 
 # Max allowed speed (limit set by waypoint_loader)
 MAX_SPEED  = rospy.get_param('/waypoint_loader/velocity') *1000/3600  # m/s
@@ -399,7 +397,7 @@ class WaypointUpdater(object):
 
                 # if red light in planning horizon
                 if( self.next_red_yellow_tl_wp_ix
-                    and 0 < self.next_red_yellow_tl_wp_ix-ego_next_wp_ix < LOOKAHEAD_WPS_FOR_TL ):
+                    and 0 < self.next_red_yellow_tl_wp_ix-ego_next_wp_ix < LOOKAHEAD_WPS):
 
                     # set flag to red light ahead
                     red_light_ahead = True
@@ -434,10 +432,7 @@ class WaypointUpdater(object):
 
                         # set target velocity to max velocity
                         # and target waypoint to position at which ego shall start to brake
-                        target_wp_ix = (start_brake_wp_ix
-                                        if ((start_brake_wp_ix - ego_next_wp_ix)<= LOOKAHEAD_WPS)
-                                        else (ego_next_wp_ix + LOOKAHEAD_WPS))
-                                        
+                        target_wp_ix = start_brake_wp_ix
                         target_velocity = MAX_SPEED
                         
                         # calculate and append waypoints from init to target state
@@ -460,9 +455,7 @@ class WaypointUpdater(object):
                         
                         # set target velocity to zero
                         # and target waypoint to stop point ahead of traffic light
-                        target_wp_ix = (stop_wp_ix
-                                        if ((stop_wp_ix - init_wp_ix) <= LOOKAHEAD_WPS)
-                                        else (init_wp_ix + LOOKAHEAD_WPS))
+                        target_wp_ix = stop_wp_ix
                         target_velocity = 0.
 
                         # calculate and append waypoints from init to target state
