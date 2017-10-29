@@ -60,7 +60,7 @@ class WaypointUpdater(object):
 
         # Construct publisher
         self.final_waypoints_pub = rospy.Publisher(
-            '/final_waypoints', Lane, queue_size=60)
+            '/final_waypoints', Lane, queue_size=1)
 
         # other member variables
         self.base_waypoints = None
