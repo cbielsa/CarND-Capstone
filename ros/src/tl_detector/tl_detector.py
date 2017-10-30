@@ -257,7 +257,8 @@ class TLDetector(object):
         #              closest_light_ix)
 
         return_light_ix = closest_light_ix
-        return_light_state = self.get_light_state()
+        if ((closest_light_ix - ego_waypoint_ix) < 120):
+            return_light_state = self.get_light_state()
 
         return return_light_ix, return_light_state
     #===========================================================================
@@ -347,6 +348,8 @@ class TLDetector(object):
                break
     
 
+    #processes traffic light using ground truth data and light postions from lights msg in traffic_cb
+    # note - this is different than process_traffic_lights() where 'stop line positions' are used
     def process_traffic_lights_ground_truth(self):
 
         #  1. get closest_waypoint_index to ego_vehicle
