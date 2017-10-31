@@ -34,7 +34,7 @@ BRAKE_DECC = 2.  # nominal decceleration used to stop car [m/s^2]
                  # (ego will be braked at up to MAX_ACC if light suddently turns red)
 
 # Braking distance when ego is at maximum speed and brakes at nominal decceleration
-MAX_BRAKE_DIST = MAX_SPEED*MAX_SPEED/(2.*BRAKE_DECC)
+#MAX_BRAKE_DIST = MAX_SPEED*MAX_SPEED/(2.*BRAKE_DECC)
 
 MARGIN_TO_TL = 0.                # distance ahead of red light ego tries to stop at [m]
 MARGIN_FOR_BRAKE_OVERSHOOT = 7.  # max distance after stop point ego may stop at [m]
@@ -238,8 +238,10 @@ class WaypointUpdater(object):
               
         self.traffic_received = True
 
+
     def dist_between_waypoints(self, ix1, ix2):
         return (self.base_waypoints_s[ix2] - self.base_waypoints_s[ix1])
+
 
     # Append to self.final_waypoints, waypoints to connect an initial state
     # to a final state (including wp for initial state but excluding final state)
@@ -360,6 +362,17 @@ class WaypointUpdater(object):
         return ix
 
 
+    # calculate index of wp behind the wp with index target_wp_ix
+    # and at a distance >= d
+    def find_wp_at_distance_behind(self, target_wp_ix, d):
+
+        ix = target_wp_ix+1
+        while self.dist_between_waypoints(target_wp_ix, ix) < d:
+            ix += 1
+
+        return ix
+
+
     # Calculate and publish final waypoints
     def loop(self):
 
@@ -402,14 +415,18 @@ class WaypointUpdater(object):
                     # set flag to red light ahead
                     red_light_ahead = True
 
-                    # find wp index of start point of crossroads
-                    start_crossroads_wp_ix = self.find_wp_at_distance_in_front(
-                        self.next_red_yellow_tl_wp_ix, MARGIN_TO_TL)
+                    # find wp index of target stop line: MARGIN_TO_TL meters before traffic light
+                    if MARGIN_TO_TL == 0.:
+                        stop_wp_ix = self.next_red_yellow_tl_wp_ix
+                    else:
+                        stop_wp_ix = self.find_wp_at_distance_in_front(
+                            self.next_red_yellow_tl_wp_ix, MARGIN_TO_TL)
 
-                    # find wp index of target stop point: MARGIN_TO_TL meters before traffic light
-                    stop_wp_ix = self.find_wp_at_distance_in_front(
-                        start_crossroads_wp_ix, MARGIN_FOR_BRAKE_OVERSHOOT)
+                    # find wp index of start point of crossroads: MARGIN_FOR_BRAKE_OVERSHOOT after stop line
+                    start_crossroads_wp_ix = self.find_wp_at_distance_behind(
+                        stop_wp_ix, MARGIN_FOR_BRAKE_OVERSHOOT)
 
+                    # distance required to brake at current velocity
                     curr_brake_dist = self.current_velocity * self.current_velocity/(2.*BRAKE_DECC)
                     
                     # identify wp at which ego shall start braking
