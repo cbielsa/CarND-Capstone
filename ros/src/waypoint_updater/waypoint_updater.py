@@ -36,11 +36,12 @@ BRAKE_DECC = 2.  # nominal decceleration used to stop car [m/s^2]
 # Braking distance when ego is at maximum speed and brakes at nominal decceleration
 #MAX_BRAKE_DIST = MAX_SPEED*MAX_SPEED/(2.*BRAKE_DECC)
 
-MARGIN_TO_TL = 0.                # distance ahead of red light ego tries to stop at [m]
-MARGIN_FOR_BRAKE_OVERSHOOT = 7.  # max distance after stop point ego may stop at [m]
-                                 # (due to PID characteristic time and latency)  
+
+MARGIN_FOR_BRAKE_OVERSHOOT = 10.  # max distance after stop point ego may stop at [m]
+                                  # (due to PID characteristic time and latency)  
 
 VEL_THRESHOLD_FOR_YELLOW = 3. # m/s
+
 
 class WaypointUpdater(object):
 
@@ -65,10 +66,19 @@ class WaypointUpdater(object):
         self.final_waypoints = None
         self.base_waypoints_s = [] # base_waypoints segment numbers
 
-        # index of closest waypoint to red light
+        # index of closest waypoint to stop line or traffic light,
+        # depending on message passed by '/traffic_waypoint'
         # (set to none if no red light in front of car)
-        self.next_red_yellow_tl_wp_ix = None
+        self.stop_wp_ix = None
+
+        # set to true if message '/traffic_waypoint' contains closest wp to traffic light
+        # set to false if message '/traffic_waypoint' contains closest wp to stop line
+        self.correct_traffic_wp_to_stopline = False
         
+        # if self.correct_traffic_wp_to_stopline = True,
+        # this is the distance [m] between a stop line and its traffic light
+        self.margin_to_tl = 30.
+
         # current velocity
         self.current_velocity = None
 
@@ -76,7 +86,7 @@ class WaypointUpdater(object):
         self.meas_pose = None
 
         # waypoint updater publishing frequency
-        self.freq = 1  # Hz
+        self.freq = 2  # Hz
 
         # flag set to truth first time an image is received
         self.traffic_received = False
@@ -226,16 +236,23 @@ class WaypointUpdater(object):
     # Callback function for /traffic_waypoint message 
     def traffic_cb(self, msg):
 
-        self.next_red_yellow_tl_wp_ix = None
+        self.stop_wp_ix = None
 
         state = msg.state
         
         if (state == TrafficLight.RED):
-            self.next_red_yellow_tl_wp_ix = msg.wp_ix
+            self.stop_wp_ix = msg.wp_ix
         elif ((state == TrafficLight.YELLOW)
               and (self.current_velocity >= VEL_THRESHOLD_FOR_YELLOW)):
-            self.next_red_yellow_tl_wp_ix = msg.wp_ix
-              
+            self.stop_wp_ix = msg.wp_ix
+        
+        # if '/traffic_waypoint' message contains closest wp to traffic light,
+        # estimate position of corresponding stop line
+        if self.stop_wp_ix and self.correct_traffic_wp_to_stopline:
+            self.stop_wp_ix = self.find_wp_at_distance_in_front(
+                self.stop_wp_ix, self.margin_to_tl)
+
+        # set availability flag
         self.traffic_received = True
 
 
@@ -409,33 +426,26 @@ class WaypointUpdater(object):
                 in_middle_of_crossroads = False
 
                 # if red light in planning horizon
-                if( self.next_red_yellow_tl_wp_ix
-                    and 0 < self.next_red_yellow_tl_wp_ix-ego_next_wp_ix < LOOKAHEAD_WPS):
+                if( self.stop_wp_ix
+                    and self.stop_wp_ix-ego_next_wp_ix < LOOKAHEAD_WPS):
 
                     # set flag to red light ahead
                     red_light_ahead = True
 
-                    # find wp index of target stop line: MARGIN_TO_TL meters before traffic light
-                    if MARGIN_TO_TL == 0.:
-                        stop_wp_ix = self.next_red_yellow_tl_wp_ix
-                    else:
-                        stop_wp_ix = self.find_wp_at_distance_in_front(
-                            self.next_red_yellow_tl_wp_ix, MARGIN_TO_TL)
-
                     # find wp index of start point of crossroads: MARGIN_FOR_BRAKE_OVERSHOOT after stop line
                     start_crossroads_wp_ix = self.find_wp_at_distance_behind(
-                        stop_wp_ix, MARGIN_FOR_BRAKE_OVERSHOOT)
+                        self.stop_wp_ix, MARGIN_FOR_BRAKE_OVERSHOOT)
 
                     # distance required to brake at current velocity
                     curr_brake_dist = self.current_velocity * self.current_velocity/(2.*BRAKE_DECC)
                     
                     # identify wp at which ego shall start braking
                     start_brake_wp_ix = self.find_wp_at_distance_in_front(
-                        stop_wp_ix, curr_brake_dist)
+                        self.stop_wp_ix, curr_brake_dist)
 
                     #rospy.loginfo(
                     #    "Red light! ego_wpix=%d, rl_wpix=%d, cross_rds_wpix=%d, stop_wpix=%d",
-                    #    ego_next_wp_ix, self.next_red_yellow_tl_wp_ix,
+                    #    ego_next_wp_ix, self.stop_wp_ix,
                     #    start_crossroads_wp_ix, stop_wp_ix)
                     
                     #rospy.loginfo(
@@ -462,17 +472,17 @@ class WaypointUpdater(object):
                         init_velocity = target_velocity
 
                         rospy.loginfo(
-                            "Red light far ahead, guiding to %f m/s, then to a stop in %d wps",
-                            target_velocity, stop_wp_ix-ego_next_wp_ix)
+                            "Stop line far ahead, guiding to %f m/s, then to a stop in %d wps",
+                            target_velocity, self.stop_wp_ix-ego_next_wp_ix)
 
 
                     # if stop point in front of init ego point,
                     # stop ego at stop point in front of red light
-                    if init_wp_ix < stop_wp_ix:
+                    if init_wp_ix < self.stop_wp_ix:
                         
                         # set target velocity to zero
                         # and target waypoint to stop point ahead of traffic light
-                        target_wp_ix = stop_wp_ix
+                        target_wp_ix = self.stop_wp_ix
                         target_velocity = 0.
 
                         # calculate and append waypoints from init to target state
@@ -483,8 +493,8 @@ class WaypointUpdater(object):
 
                         if ego_next_wp_ix >= start_brake_wp_ix:
                             rospy.loginfo(
-                                "Red light close ahead, guiding to a stop in %d wps",
-                                stop_wp_ix-ego_next_wp_ix)
+                                "Red light, stop line close ahead, guiding to a stop in %d wps",
+                                self.stop_wp_ix-ego_next_wp_ix)
 
                     # case ego is between start of crossroads and red light,
                     # get out of there!
@@ -498,8 +508,7 @@ class WaypointUpdater(object):
                     # stay there until green light
                     else:
                         rospy.loginfo(
-                            "Red light close ahead at %d wps, ego stopped before crossroads, stay there",
-                            self.next_red_yellow_tl_wp_ix-ego_next_wp_ix)
+                            "Red light, ego stopped before crossroads, stay there")
 
 
                 # if no red light ahead or in the middle of crossroads:
@@ -511,7 +520,6 @@ class WaypointUpdater(object):
                     target_wp_ix = ego_next_wp_ix + LOOKAHEAD_WPS
                     target_velocity = MAX_SPEED
 
-                    #self.final_waypoints = Lane()
                     # calculate and append waypoints from init to target state
                     self.append_final_waypoints(
                         init_wp_ix, init_velocity,
@@ -522,8 +530,8 @@ class WaypointUpdater(object):
                             "No red light ahead, guiding to %f m/s", target_velocity)
                     elif in_middle_of_crossroads:
                         rospy.loginfo(
-                            "Red light close ahead at %d wps, ego in the middle of crossroads, guiding to %f m/s",
-                            self.next_red_yellow_tl_wp_ix-ego_next_wp_ix, target_velocity)
+                            "In the middle of crossroads, guiding to %f m/s",
+                            target_velocity)
 
 
                 #rospy.loginfo("** Number of wps published = %d",
