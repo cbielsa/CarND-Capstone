@@ -1,5 +1,6 @@
 Header header
 uint32 wp_ix
+time first_detect_time
 uint8 state
 
 uint8 UNKNOWN=4

@@ -18,6 +18,9 @@ import matplotlib.pyplot as plt
 STATE_COUNT_THRESHOLD = 3
 PROCESS_TL_GROUND_TRUTH = False
 
+DISTANCE_TO_TL_FROM_STOP_LINE = 15 #mts
+DISTANCE_FROM_TL_FOR_PREDICTION = 120 #mts
+
 class TLDetector(object):
 
     def __init__(self):
@@ -162,6 +165,7 @@ class TLDetector(object):
         if self.state != state:
             self.state_count = 0
             self.state = state
+            self.state_first_detect_time = rospy.get_rostime()
         elif self.state_count >= STATE_COUNT_THRESHOLD:
             self.last_state = self.state
             #light_wp = (light_wp
@@ -169,14 +173,21 @@ class TLDetector(object):
             #            else -1)
             self.last_wp = light_wp
             if(light_wp != -1):
+                notify_state.header.frame_id = '/tl_waypoint'
+                notify_state.header.stamp = rospy.get_rostime()
                 notify_state.wp_ix = light_wp
                 notify_state.state = state
+                notify_state.first_detect_time = self.state_first_detect_time
+                
                 self.upcoming_light_pub.publish(notify_state)
                 
         else:
             if(self.last_wp != -1):
+                notify_state.header.frame_id = '/tl_waypoint'
+                notify_state.header.stamp = rospy.get_rostime()
                 notify_state.wp_ix = self.last_wp
                 notify_state.state = self.last_state
+                notify_state.first_detect_time = self.state_first_detect_time
                 self.upcoming_light_pub.publish(notify_state)
             
         self.state_count += 1
@@ -243,7 +254,7 @@ class TLDetector(object):
         
         # TODO: Fix wraparound
         for light_wp_ix in self.tl_nearest_wps:
-            if(ego_waypoint_ix > light_wp_ix):
+            if(ego_waypoint_ix > light_wp_ix + DISTANCE_TO_TL_FROM_STOP_LINE):
                 continue
             closest_light_ix = light_wp_ix
             break
@@ -257,7 +268,11 @@ class TLDetector(object):
         #              closest_light_ix)
 
         return_light_ix = closest_light_ix
-        if ((closest_light_ix - ego_waypoint_ix) < 120):
+
+        dist_to_tl = (closest_light_ix + DISTANCE_TO_TL_FROM_STOP_LINE)- ego_waypoint_ix
+        
+        # try to detect only if ego is within 120 mts before light
+        if( dist_to_tl < DISTANCE_FROM_TL_FOR_PREDICTION): 
             return_light_state = self.get_light_state()
 
         return return_light_ix, return_light_state
