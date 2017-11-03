@@ -34,7 +34,7 @@ class Controller(object):
 
         # construct PID speed controller
         kp = 0.6
-        ki = 0.0005
+        ki = 0.
         kd = 0.05
 
         # time between controller cycles if no latency [s]
