@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 STATE_COUNT_THRESHOLD = 3
 PROCESS_TL_GROUND_TRUTH = False
 
-DISTANCE_TO_TL_FROM_STOP_LINE = 15 #mts
+WPS_TO_TL_FROM_STOP_LINE = 15 #mts
 DISTANCE_FROM_TL_FOR_PREDICTION = 120 #mts
 
 class TLDetector(object):
@@ -225,7 +225,32 @@ class TLDetector(object):
         #Get classification
         return self.light_classifier.get_classification(cv_image)
 
+    def find_closest_tl_in_front(self, ego_waypoint_ix):
 
+        #to handle wraparound
+        last_tl_wp = self.tl_nearest_wps[len(self.tl_nearest_wps) - 1]
+        
+        if(ego_waypoint_ix > last_tl_wp + WPS_TO_TL_FROM_STOP_LINE):
+            # We are about to wraparound. return the first wp in list
+            closest_light_ix = self.tl_nearest_wps[0]
+
+            # Approximation
+            dist_to_tl = (self.dist(self.waypoints.waypoints[closest_light_ix].pose.pose.position,
+                                    self.waypoints.waypoints[ego_waypoint_ix].pose.pose.position)
+                          + WPS_TO_TL_FROM_STOP_LINE)
+        else:
+            for light_wp_ix in self.tl_nearest_wps:
+                if(ego_waypoint_ix > light_wp_ix + WPS_TO_TL_FROM_STOP_LINE):
+                    continue
+                closest_light_ix = light_wp_ix
+                break
+
+            # Approximation
+            dist_to_tl = (closest_light_ix + WPS_TO_TL_FROM_STOP_LINE) - ego_waypoint_ix
+
+        return closest_light_ix, dist_to_tl
+        
+        
     def process_traffic_lights(self):
         """Finds closest visible traffic light, if one exists, and determines its
             location and color
@@ -251,14 +276,9 @@ class TLDetector(object):
 
         return_light_ix = -1
         return_light_state = TrafficLight.UNKNOWN
-        
-        # TODO: Fix wraparound
-        for light_wp_ix in self.tl_nearest_wps:
-            if(ego_waypoint_ix > light_wp_ix + DISTANCE_TO_TL_FROM_STOP_LINE):
-                continue
-            closest_light_ix = light_wp_ix
-            break
-        
+
+        closest_light_ix, dist_to_tl = self.find_closest_tl_in_front(ego_waypoint_ix)
+
         #rospy.loginfo(" Ego index: %d pos: x:%f, y:%f",
         #              ego_waypoint_ix,
         #              self.pose.pose.position.x,
@@ -269,8 +289,6 @@ class TLDetector(object):
 
         return_light_ix = closest_light_ix
 
-        dist_to_tl = (closest_light_ix + DISTANCE_TO_TL_FROM_STOP_LINE)- ego_waypoint_ix
-        
         # try to detect only if ego is within 120 mts before light
         if( dist_to_tl < DISTANCE_FROM_TL_FOR_PREDICTION): 
             return_light_state = self.get_light_state()

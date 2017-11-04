@@ -255,16 +255,17 @@ class WaypointUpdater(object):
         # if closest waypoint is behind ego, take next wp
         if self.is_behind_ego(ego_heading, closest_wp_heading):
             closest_wp_index += 1
+
+        closest_wp_index = closest_wp_index%self.total_waypoints
             
         return closest_wp_index
-
 
 
     # Subscriber callback functions ==================================
 
     # Callback function for /current_pose
     def pose_cb(self, poseStamped):
-
+        
         self.meas_pose = poseStamped
 
     # Callback function for /current_velocity
@@ -358,164 +359,49 @@ class WaypointUpdater(object):
 
     # ix2 is expected to be greater than ix1
     def dist_between_waypoints(self, ix1, ix2):
-        #ix2 = ix2 % self.total_waypoints
-        #if(ix1 < 0):
-        #    ix1 = self.total_waypoints + ix1
+        num_waypoints = abs(ix2 - ix1)
+        if(num_waypoints > (self.total_waypoints/2)):
+            next_wp = ix1
+            num_waypoints = (self.total_waypoints - ix1) + ix2
+
+            # wrapped around. walk through and get distance
+            rospy.loginfo(" ")
+            rospy.loginfo(" WRAPPED AROUND! (ix1=%d, ix2=%d). num_wps %d", ix1, ix2, num_waypoints)
+            rospy.loginfo(" ")
+
+            # Approximation...
+            tot_dist = self.dist(self.base_waypoints.waypoints[ix1].pose.pose.position,
+                                 self.base_waypoints.waypoints[ix2].pose.pose.position)
+            
+            #for i in range(num_waypoints):
+            #    tot_dist += self.dist_to_very_next_waypoint(ix1, next_wp)
+            #    ix1 = next_wp
+            #    next_wp = self.find_very_next_wp_after(ix1)
+
+            return tot_dist
+        
+        else:
+            return (self.base_waypoints_s[ix2] - self.base_waypoints_s[ix1])
+
+        
+    # ix2 is expected to be greater than ix1
+    def dist_to_very_next_waypoint(self, ix1, ix2):
+        ix2 = ix2 % self.total_waypoints
+        if(ix1 < 0):
+            ix1 = self.total_waypoints + ix1
 
         if(ix2 < ix1):
-            # To handle wraparound
-            # Note that this is an approximation. This distance is NOT
-            # along waypoints but direct distance. 
-        #    a = self.base_waypoints.waypoints[ix1].pose.pose.position
-        #    b = self.base_waypoints.waypoints[ix2].pose.pose.position
-        #    rospy.loginfo(" ")
-        #    rospy.loginfo(" **** ix2 (%d) < ix1(%d)****", ix2, ix1)
-        #    rospy.loginfo(" ")
-        #    return math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2)
-            return 0
+            rospy.loginfo(" ")
+            rospy.loginfo("ONLY possible at wraparound (ix1=%d, ix2%d)", ix1, ix2)
+            rospy.loginfo(" ")
+            # Approximation
+            return self.dist(self.base_waypoints.waypoints[ix1].pose.pose.position,
+                             self.base_waypoints.waypoints[ix2].pose.pose.position)
         else:
             return (self.base_waypoints_s[ix2] - self.base_waypoints_s[ix1])
 
 
-    # Append to self.final_waypoints, waypoints to connect an initial state
-    # to a final state (including wp for initial state but excluding final state)
-    # Velocities are calculated for either constant acceleration or
-    # MAX_ACC, depending on value of input flag 'at_max_acc'
-    def append_final_waypoints(
-        self,
-        init_wp_ix, init_velocity,
-        final_wp_ix, final_velocity,
-        at_max_acc = False ):
-
-        # check input indices
-        if final_wp_ix <= init_wp_ix:
-            rospy.logwarn(
-                "append_final_waypoints: final_wp_ix (%0.2f) <= init_wp_ix (%d)",
-                final_wp_ix, init_wp_ix)
-            return
-
-
-        # select acceleration ---
-
-        # case max acceleration
-        if at_max_acc:
-
-            if final_velocity > init_velocity:
-                acc = MAX_ACC
-            else:
-                acc = -MAX_ACC
-
-        # case constant acceleration
-        else:
-
-            # calculate distance between init and final position,
-            # along driving path
-            d = self.dist_between_waypoints(init_wp_ix, final_wp_ix)
-
-            if d < 0.1:
-                rospy.logwarn(
-                    "append_final_waypoints: too small distance between init_wp_ix (%d) and final_wp_ix (%0.2f)",
-                    init_wp_ix, final_wp_ix)
-                return
-
-            # calculate constant acceleration between initial and final states
-            acc = (final_velocity - init_velocity)*(final_velocity + init_velocity)/(2.*d)
-
-            # truncate acceleration to maximum allowed value
-            if acc > MAX_ACC:
-                acc = MAX_ACC
-            elif acc < -MAX_ACC:
-                acc = -MAX_ACC
-
-
-        # initialize velocity
-        v  = init_velocity
-        v2 = v*v
-
-        final_vel_reached = False
-
-        for i in range( init_wp_ix, final_wp_ix ):
-
-            # get base waypoint
-            wp = self.base_waypoints.waypoints[i]
-
-            if not final_vel_reached:
-
-                # calculate distance from previous waypoint
-                d = self.dist_between_waypoints(i-1, i)
-
-                # propagate velocity from previous waypoint
-                v2 += 2.*acc*d
-                if (v2 > 0.):
-                    v = math.sqrt( v2 )
-                else:
-                    v = 0.
-
-                # check whether target velocity has been reached
-                if (acc>0. and v>=final_velocity) or (acc<0. and v<=final_velocity):
-                    v = final_velocity
-                    final_vel_reached = True
-
-
-            # update longitudinal velocity in waypoint
-            wp.twist.twist.linear.x = v
-
-            # append waypoint
-            self.final_waypoints.waypoints.append(wp)
-
-
-    # Append base_waypoints between given indeces to self.final_waypoints,
-    # leaving velocity of base_waypoints unchanged
-    def append_final_waypoints_base_speed(
-        self, init_wp_ix, final_wp_ix ):
-
-        # check input indices
-        if final_wp_ix <= init_wp_ix:
-            rospy.logwarn(
-                "append_final_waypoints_base_speed: final_wp_ix (%0.2f) <= init_wp_ix (%d)",
-                final_wp_ix, init_wp_ix)
-            return
-
-        for i in range( init_wp_ix, final_wp_ix ):
-
-            # get base waypoint
-            wp = self.base_waypoints.waypoints[i]
-
-            # append waypoint
-            self.final_waypoints.waypoints.append(wp)
-
-
-    # calculate index of wp in front of the wp with index target_wp_ix
-    # and at a distance >= d
-    def find_wp_at_distance_in_front(self, target_wp_ix, d):
-
-        ix = target_wp_ix-1
-        while self.dist_between_waypoints(ix, target_wp_ix) < d:
-            ix -= 1
-
-        return ix
-
-
-    # calculate index of wp behind the wp with index target_wp_ix
-    # and at a distance >= d
-    def find_wp_at_distance_behind(self, target_wp_ix, d):
-
-        ix = target_wp_ix+1
-        while self.dist_between_waypoints(target_wp_ix, ix) < d:
-            ix += 1
-
-        return ix
-
-
-    def find_wp_at_distance_before(self, target_wp_ix, d):
-
-        ix = target_wp_ix - 1
-        while self.dist_between_waypoints(ix, target_wp_ix) < d:
-            ix -= 1
-
-        return ix
-
-    def find_wp_after(self, wp_ix):
+    def find_very_next_wp_after(self, wp_ix):
         return (wp_ix + 1)%self.total_waypoints
     
     def find_wp_at_distance_after(self, wp_ix, d):
@@ -523,16 +409,14 @@ class WaypointUpdater(object):
         tot_dist = 0
         
         while(True):
-            tot_dist += self.dist_between_waypoints(wp_ix, next_wp)
+            tot_dist += self.dist_to_very_next_waypoint(wp_ix, next_wp)
             if(tot_dist >= d):
                 break
             else:
                 wp_ix = next_wp
-                next_wp = self.find_wp_after(wp_ix)
+                next_wp = self.find_very_next_wp_after(wp_ix)
 
         return next_wp
-
-    
     
     def ego_obeyed_prev_tl(self, ego_next_wp_ix):
         if(self.tl_prev_wp_ix == None):
@@ -554,7 +438,6 @@ class WaypointUpdater(object):
 
         accelerate = False
 
-        ## TODO: Using dist_between_waypoints directly! Wraparound!
         dist_to_stopline = self.dist_between_waypoints(ego_wp, tl_stopline_wp)
         
         # We have to take into account actuation delays to predict where ego will be when
@@ -619,7 +502,8 @@ class WaypointUpdater(object):
                 
                 accelerate = True
 
-        elif(self.tl_cur_state == TrafficLight.RED):
+        elif(self.tl_cur_state == TrafficLight.RED
+             or self.tl_cur_state == TrafficLight.UNKNOWN):
             # Predict where will ego be in the future
             
             secs = TIME_COMPENSATE_PROP_DELAYS #seconds
@@ -664,15 +548,13 @@ class WaypointUpdater(object):
         if(cur_state == TrafficLight.RED):
             # Actual Red or treat as Red
             
-            #end_wp = self.find_wp_at_distance_before(self.tl_cur_wp_ix,
-            #                                         (CAR_LENGTH/2))
             if(dist_to_stop < 0):
-                #end_wp = (ego_wp + 1) % self.total_waypoints # Not great. but has to do...
+
                 dist_to_go = 0
                 end_vel = 0
                 accl = 0
             else:
-                #end_wp = self.find_wp_at_distance_after(ego_wp, dist_to_stop)
+
                 dist_to_go = dist_to_stop
                 accl = ((dist_to_stop/MAX_LOOKAHEAD_WPS)*MAX_ACC)
                 end_vel = math.sqrt(2*accl*dist_to_stop)
@@ -714,7 +596,7 @@ class WaypointUpdater(object):
 
         if(dist_to_go == 0):
             # Brake rightaway
-            next_wp = self.find_wp_after(ego_pred_wp)
+            next_wp = self.find_very_next_wp_after(ego_pred_wp)
             wp = self.base_waypoints.waypoints[next_wp]
             # update longitudinal velocity in waypoint
             wp.twist.twist.linear.x = 0
@@ -736,14 +618,15 @@ class WaypointUpdater(object):
         while(True):
             final_vel_reached = False
             cur_wp = next_wp
-            next_wp = self.find_wp_after(cur_wp)
+            next_wp = self.find_very_next_wp_after(cur_wp)
 
             step_dist = self.dist_between_waypoints(cur_wp, next_wp)
             
             dist_covered += step_dist
 
-            if(dist_covered >= dist_to_go):
-                rospy.loginfo("   *** BREAK. Distance covered %0.4f", dist_covered)
+            if(dist_covered >= dist_to_go or step_dist < 0):
+                #rospy.loginfo("   *** BREAK. Distance covered %0.4f, step_dist %0.4f",
+                #              dist_covered, step_dist)
                 break
             else:
                 wp = self.base_waypoints.waypoints[next_wp]
@@ -770,10 +653,10 @@ class WaypointUpdater(object):
 
                 num_waypoints += 1
                 
-        rospy.loginfo("Num waypoints published %d", num_waypoints)
+        #rospy.loginfo("Num waypoints published %d", num_waypoints)
         
         return num_waypoints
-        
+
         
     # Calculate and publish final waypoints
     def loop(self):
